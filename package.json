@@ -99,6 +99,11 @@
         }
       },
       {
+        "command": "gradleKotlin.upgradeWrapper",
+        "title": "Gradle: Upgrade Wrapper",
+        "category": "Gradle Kotlin"
+      },
+      {
         "command": "gradleKotlin.runTask",
         "title": "Gradle: Run Task",
         "category": "Gradle Kotlin",

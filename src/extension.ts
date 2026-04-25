@@ -24,6 +24,12 @@ import { registerGradleRunTool } from './aiTool';
 import { RecentRun, pushRecent } from './history';
 import { splitArgs } from './argSplit';
 import { parseGradleDiagnostics } from './buildDiagnostics';
+import {
+    compareVersions,
+    distributionUrlFor,
+    parseWrapperProperties,
+    rewriteDistributionUrl,
+} from './wrapper';
 
 const HISTORY_KEY = 'gradleKotlin.recentRuns';
 
@@ -85,6 +91,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             { scheme: 'file', pattern: '**/*.gradle{,.kts}' },
             codeLensProvider
         ),
+        vscode.languages.registerCodeLensProvider(
+            { scheme: 'file', pattern: '**/gradle/wrapper/gradle-wrapper.properties' },
+            codeLensProvider
+        ),
         vscode.languages.registerInlayHintsProvider(
             { scheme: 'file', pattern: '**/*.gradle{,.kts}' },
             inlayProvider
@@ -135,6 +145,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('gradleKotlin.refresh', () => refreshAll(modulesProvider, codeLensProvider, inlayProvider)),
         vscode.commands.registerCommand('gradleKotlin.reloadProject', async () => {
             await reloadProject(daemon);
+            await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
+        }),
+        vscode.commands.registerCommand('gradleKotlin.upgradeWrapper', async (uri?: vscode.Uri) => {
+            await upgradeWrapper(daemon, uri);
             await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
         }),
         vscode.commands.registerCommand('gradleKotlin.runTask', async (target: ModuleTreeItemData | GradleTask | undefined) => {
@@ -341,6 +355,81 @@ async function reloadProject(daemon: ReturnType<typeof getDaemon>): Promise<void
         'Gradle: Reload Project',
         { workspaceRoot: folder.uri.fsPath, args: ['help', '--quiet'] }
     );
+}
+
+/**
+ * Implements the "Upgrade wrapper" CodeLens.  Fetches
+ * https://services.gradle.org/versions/current, compares the version
+ * field with the pinned distributionUrl, and if a newer release is
+ * available offers to rewrite the wrapper-properties + run
+ * `:wrapper --gradle-version <next>` so the wrapper jar matches.
+ */
+async function upgradeWrapper(
+    daemon: ReturnType<typeof getDaemon>,
+    uri?: vscode.Uri
+): Promise<void> {
+    const target = uri ?? vscode.window.activeTextEditor?.document.uri;
+    if (!target) {
+        vscode.window.showInformationMessage('Open gradle-wrapper.properties first.');
+        return;
+    }
+    const folder = vscode.workspace.getWorkspaceFolder(target);
+    if (!folder) return;
+
+    let text: string;
+    try {
+        text = (await vscode.workspace.fs.readFile(target)).toString();
+    } catch {
+        vscode.window.showErrorMessage(`Cannot read ${target.fsPath}.`);
+        return;
+    }
+    const parsed = parseWrapperProperties(text);
+    if (!parsed) {
+        vscode.window.showInformationMessage('No distributionUrl found in this wrapper file.');
+        return;
+    }
+
+    const latest = await fetchLatestGradleVersion();
+    if (!latest) {
+        vscode.window.showWarningMessage('Could not fetch latest Gradle version (network issue?).');
+        return;
+    }
+
+    if (compareVersions(latest, parsed.version) <= 0) {
+        vscode.window.showInformationMessage(`Gradle wrapper is already up to date (${parsed.version}).`);
+        return;
+    }
+
+    const choice = await vscode.window.showInformationMessage(
+        `A newer Gradle is available: ${parsed.version} → ${latest}. Upgrade now?`,
+        { modal: false },
+        'Upgrade',
+        'Show release notes'
+    );
+    if (choice === 'Show release notes') {
+        vscode.env.openExternal(vscode.Uri.parse(`https://docs.gradle.org/${latest}/release-notes.html`));
+        return;
+    }
+    if (choice !== 'Upgrade') return;
+
+    const newText = rewriteDistributionUrl(text, distributionUrlFor(latest, parsed.flavor));
+    await vscode.workspace.fs.writeFile(target, Buffer.from(newText, 'utf8'));
+    await runWithProgress(
+        daemon,
+        `Gradle: wrapper --gradle-version ${latest}`,
+        { workspaceRoot: folder.uri.fsPath, args: ['wrapper', '--gradle-version', latest] }
+    );
+}
+
+async function fetchLatestGradleVersion(): Promise<string | undefined> {
+    try {
+        const res = await fetch('https://services.gradle.org/versions/current');
+        if (!res.ok) return undefined;
+        const data = (await res.json()) as { version?: string };
+        return typeof data.version === 'string' ? data.version : undefined;
+    } catch {
+        return undefined;
+    }
 }
 /**
  * Pick the most relevant workspace folder for a command:
