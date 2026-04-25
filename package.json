@@ -96,6 +96,12 @@
         "icon": "$(edit)"
       },
       {
+        "command": "gradleKotlin.runTestsForTask",
+        "title": "Gradle: Run Tests in Task…",
+        "category": "Gradle Kotlin",
+        "icon": "$(beaker)"
+      },
+      {
         "command": "gradleKotlin.rerunRecent",
         "title": "Gradle: Re-run Recent",
         "category": "Gradle Kotlin",
@@ -152,6 +158,11 @@
           "command": "gradleKotlin.runTaskWithArgs",
           "when": "view == gradleKotlin.modulesView && viewItem == gradleTask",
           "group": "inline@2"
+        },
+        {
+          "command": "gradleKotlin.runTestsForTask",
+          "when": "view == gradleKotlin.modulesView && viewItem == gradleTask",
+          "group": "inline@3"
         },
         {
           "command": "gradleKotlin.openModule",

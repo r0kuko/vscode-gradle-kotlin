@@ -5,6 +5,7 @@ import {
     GradleTask,
     discoverModuleTasksStatically,
     findOwningModule,
+    parseTasksAllOutput,
     qualifyTask,
 } from './tasks';
 import { VersionCatalog, findCatalogFile, parseCatalogFile } from './libs';
@@ -30,6 +31,7 @@ interface WorkspaceState {
 }
 
 const workspaces = new Map<string, WorkspaceState>();
+const dynamicTasksByModule = new Map<string, GradleTask[]>();
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     output = vscode.window.createOutputChannel('Gradle Kotlin');
@@ -40,6 +42,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(createDaemonStatusItem(daemon));
 
     const modulesProvider = new GradleModulesProvider(context.extensionPath);
+    modulesProvider.setTaskResolver(module => mergedTasks(module));
     const treeView = vscode.window.createTreeView('gradleKotlin.modulesView', {
         treeDataProvider: modulesProvider,
         showCollapseAll: true,
@@ -111,6 +114,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('gradleKotlin.runTaskWithArgs', async (target: ModuleTreeItemData | GradleTask | undefined) => {
             await runTaskCommand(daemon, target, recordRun, { promptForArgs: true });
         }),
+        vscode.commands.registerCommand('gradleKotlin.runTestsForTask', async (target: ModuleTreeItemData | GradleTask | undefined) => {
+            await runTestsForTask(daemon, target, recordRun);
+        }),
         vscode.commands.registerCommand('gradleKotlin.rerunRecent', async (run: RecentRun) => {
             if (!run) return;
             output.show(true);
@@ -178,6 +184,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
 
     await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
+    await hydrateAllTasks(daemon, modulesProvider);
 }
 
 export function deactivate(): void {
@@ -205,6 +212,7 @@ async function refreshAll(
     inlayProvider: LibsInlayHintsProvider
 ): Promise<void> {
     workspaces.clear();
+    dynamicTasksByModule.clear();
     const folders = vscode.workspace.workspaceFolders ?? [];
     for (const folder of folders) {
         const root = folder.uri.fsPath;
@@ -217,6 +225,47 @@ async function refreshAll(
     }
     codeLensProvider.refresh();
     inlayProvider.refresh();
+}
+
+function moduleKey(module: GradleModule): string {
+    return `${module.workspaceRoot}::${module.projectPath}`;
+}
+
+function mergedTasks(module: GradleModule): GradleTask[] {
+    const staticTasks = discoverModuleTasksStatically(module);
+    const dynamicTasks = dynamicTasksByModule.get(moduleKey(module)) ?? [];
+    const byName = new Map<string, GradleTask>();
+    for (const t of staticTasks) byName.set(t.name, t);
+    for (const t of dynamicTasks) byName.set(t.name, t);
+    return Array.from(byName.values()).sort((a, b) => {
+        const ag = a.group ?? 'zzz';
+        const bg = b.group ?? 'zzz';
+        if (ag !== bg) return ag.localeCompare(bg);
+        return a.name.localeCompare(b.name);
+    });
+}
+
+async function hydrateAllTasks(
+    daemon: ReturnType<typeof getDaemon>,
+    treeProvider: GradleModulesProvider
+): Promise<void> {
+    for (const ws of workspaces.values()) {
+        for (const module of ws.modules) {
+            try {
+                const result = await daemon.run({
+                    workspaceRoot: ws.folder.uri.fsPath,
+                    args: [qualifyTask(module.projectPath, 'tasks'), '--all', '--quiet'],
+                });
+                const parsed = parseTasksAllOutput(result.combined, module.projectPath);
+                if (parsed.length > 0) {
+                    dynamicTasksByModule.set(moduleKey(module), parsed);
+                }
+            } catch {
+                // Best-effort only: static tasks remain available.
+            }
+        }
+        treeProvider.refresh();
+    }
 }
 
 async function reloadProject(daemon: ReturnType<typeof getDaemon>): Promise<void> {
@@ -291,6 +340,49 @@ function splitArgs(input: string): string[] {
     let m: RegExpExecArray | null;
     while ((m = re.exec(input)) !== null) out.push(m[1] ?? m[2]);
     return out;
+}
+
+async function runTestsForTask(
+    daemon: ReturnType<typeof getDaemon>,
+    target: ModuleTreeItemData | GradleTask | undefined,
+    recordRun: (r: RecentRun) => Promise<void>
+): Promise<void> {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder) return;
+
+    let task: GradleTask | undefined;
+    if (target && 'kind' in target && target.kind === 'task' && target.task) {
+        task = target.task;
+    } else if (target && 'name' in target && (target as GradleTask).name) {
+        task = target as GradleTask;
+    }
+    if (!task) {
+        vscode.window.showInformationMessage('Select a Gradle test task first.');
+        return;
+    }
+    if (!/(^|:)(test|check)$/i.test(task.name)) {
+        vscode.window.showInformationMessage('This action is intended for test/check tasks.');
+        return;
+    }
+
+    const pattern = await vscode.window.showInputBox({
+        prompt: `Test filter pattern for ${task.name}`,
+        placeHolder: '*MyTest* or com.example.MyTest',
+    });
+    if (pattern === undefined || !pattern.trim()) return;
+
+    const qualified = qualifyTask(task.projectPath, task.name);
+    const args = [qualified, '--tests', pattern.trim()];
+    output.show(true);
+    const result = await daemon.run({ workspaceRoot: folder.uri.fsPath, args });
+    await recordRun({
+        task: qualified,
+        args: ['--tests', pattern.trim()],
+        workspaceRoot: folder.uri.fsPath,
+        timestamp: Date.now(),
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+    });
 }
 
 async function runDependencies(

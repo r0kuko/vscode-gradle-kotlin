@@ -53,6 +53,8 @@ export class GradleModulesProvider
 
     private modulesByWorkspace = new Map<string, GradleModule[]>();
     private recentByWorkspace = new Map<string, RecentRun[]>();
+    private taskResolver: (module: GradleModule) => GradleTask[] = m =>
+        discoverModuleTasksStatically(m);
 
     constructor(private readonly extensionPath: string) {}
 
@@ -63,6 +65,11 @@ export class GradleModulesProvider
 
     setRecent(workspaceRoot: string, runs: RecentRun[]): void {
         this.recentByWorkspace.set(workspaceRoot, runs);
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    setTaskResolver(resolver: (module: GradleModule) => GradleTask[]): void {
+        this.taskResolver = resolver;
         this._onDidChangeTreeData.fire(undefined);
     }
 
@@ -189,7 +196,7 @@ export class GradleModulesProvider
             }
             case 'tasksFolder': {
                 if (!element.module) return [];
-                const tasks = discoverModuleTasksStatically(element.module);
+                const tasks = this.taskResolver(element.module);
                 return tasks.map(t => ({
                     kind: 'task',
                     workspaceRoot: element.workspaceRoot,
