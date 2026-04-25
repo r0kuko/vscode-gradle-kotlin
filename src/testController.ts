@@ -20,7 +20,22 @@ export function createTestController(
     context: vscode.ExtensionContext,
     daemon: GradleDaemon,
     listModules: () => GradleModule[]
-): vscode.TestController {
+): vscode.TestController | undefined {
+    // The sibling extension `r0kuko.vscode-kotlin-test-adapter` already
+    // ships its own Test Explorer for the same Kotlin source files. When
+    // both controllers are active VS Code shows duplicate "Gradle Test"
+    // / "Kotlin Tests" trees. Defer to the dedicated adapter when it's
+    // installed so we don't fight over discovery results.
+    const sibling = vscode.extensions.getExtension('r0kuko.vscode-kotlin-test-adapter');
+    if (sibling) {
+        const log = vscode.window.createOutputChannel('Gradle Kotlin');
+        log.appendLine(
+            '[testController] r0kuko.vscode-kotlin-test-adapter detected — skipping built-in Test Explorer integration to avoid duplicate trees.'
+        );
+        log.dispose();
+        return undefined;
+    }
+
     const controller = vscode.tests.createTestController('gradleKotlin', 'Gradle Tests');
     context.subscriptions.push(controller);
 
