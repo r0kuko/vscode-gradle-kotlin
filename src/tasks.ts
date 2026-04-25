@@ -204,14 +204,26 @@ export function findOwningModule(
     modules: readonly GradleModule[],
     fsPath: string
 ): GradleModule | undefined {
+    const target = normalizeForCompare(fsPath);
     let best: GradleModule | undefined;
     for (const m of modules) {
-        if (
-            fsPath === m.rootPath ||
-            fsPath.startsWith(m.rootPath + path.sep)
-        ) {
+        const root = normalizeForCompare(m.rootPath);
+        if (target === root || target.startsWith(root + '/')) {
             if (!best || m.rootPath.length > best.rootPath.length) best = m;
         }
     }
     return best;
+}
+
+/**
+ * Normalize a filesystem path for prefix comparison: lowercase the
+ * Windows drive letter, strip a trailing separator, and convert all
+ * back-slashes to forward-slashes so cross-platform call sites that
+ * pass POSIX-style paths still match.
+ */
+function normalizeForCompare(p: string): string {
+    let out = p.replace(/\\/g, '/');
+    if (out.endsWith('/')) out = out.slice(0, -1);
+    if (/^[A-Za-z]:/.test(out)) out = out[0].toLowerCase() + out.slice(1);
+    return out;
 }
