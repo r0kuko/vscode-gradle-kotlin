@@ -31,15 +31,34 @@ export interface DaemonRunResult {
     durationMs: number;
 }
 
+/** Lifecycle event fired by {@link GradleDaemon} for UI consumers. */
+export interface DaemonEvent {
+    kind: 'start' | 'finish';
+    workspaceRoot: string;
+    /** The args we passed to gradle (without the appended --daemon flags). */
+    args: string[];
+    /** Set on `finish` only. */
+    result?: DaemonRunResult;
+}
+
 const MAX_BUFFER = 8 * 1024 * 1024;
 
 export class GradleDaemon implements vscode.Disposable {
     private queue = new Map<string, Promise<unknown>>();
     private readonly output: vscode.OutputChannel;
+    private readonly _onEvent = new vscode.EventEmitter<DaemonEvent>();
+    /** Public event stream (used by status bar / task-history view). */
+    readonly onEvent = this._onEvent.event;
+    private activeCount = 0;
     private disposed = false;
 
     constructor(output: vscode.OutputChannel) {
         this.output = output;
+    }
+
+    /** Number of currently-running gradle invocations across all workspaces. */
+    get running(): number {
+        return this.activeCount;
     }
 
     /**
@@ -70,6 +89,8 @@ export class GradleDaemon implements vscode.Disposable {
 
         this.output.appendLine(`\n> ${command} ${args.join(' ')}`);
         this.output.show(true);
+        this.activeCount++;
+        this._onEvent.fire({ kind: 'start', workspaceRoot: req.workspaceRoot, args: req.args });
 
         return new Promise<DaemonRunResult>(resolve => {
             const child = cp.spawn(command, args, {
@@ -105,24 +126,30 @@ export class GradleDaemon implements vscode.Disposable {
             child.on('error', err => {
                 cancel?.dispose();
                 this.output.appendLine(`\n[ERROR] Failed to spawn ${command}: ${err.message}`);
-                resolve({
+                const result: DaemonRunResult = {
                     exitCode: -1,
                     stdout,
                     stderr: stderr + err.message,
                     combined: combined + err.message,
                     durationMs: Date.now() - start,
-                });
+                };
+                this.activeCount = Math.max(0, this.activeCount - 1);
+                this._onEvent.fire({ kind: 'finish', workspaceRoot: req.workspaceRoot, args: req.args, result });
+                resolve(result);
             });
             child.on('close', code => {
                 cancel?.dispose();
                 this.output.appendLine(`\n[exit ${code}] ${command} ${args.join(' ')}`);
-                resolve({
+                const result: DaemonRunResult = {
                     exitCode: code,
                     stdout,
                     stderr,
                     combined,
                     durationMs: Date.now() - start,
-                });
+                };
+                this.activeCount = Math.max(0, this.activeCount - 1);
+                this._onEvent.fire({ kind: 'finish', workspaceRoot: req.workspaceRoot, args: req.args, result });
+                resolve(result);
             });
         });
     }
@@ -136,6 +163,7 @@ export class GradleDaemon implements vscode.Disposable {
 
     dispose(): void {
         this.disposed = true;
+        this._onEvent.dispose();
     }
 }
 

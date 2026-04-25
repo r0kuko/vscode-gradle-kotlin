@@ -163,10 +163,27 @@ export const window = {
         dispose: () => {},
     }),
     createTreeView: () => ({ dispose() {} }),
+    createStatusBarItem: (_align?: number, _priority?: number) => ({
+        text: '',
+        tooltip: '' as string | undefined,
+        command: '' as string | undefined,
+        show() {},
+        hide() {},
+        dispose() {},
+    }),
     showInputBox: async () => undefined,
+    showQuickPick: async () => undefined,
     showInformationMessage: async (_m: string) => undefined,
+    showErrorMessage: async (_m: string) => undefined,
     showTextDocument: async () => ({}),
+    withProgress: async (_o: unknown, fn: (p: unknown) => unknown) =>
+        fn({ report: () => {} }),
 };
+
+export enum StatusBarAlignment {
+    Left = 1,
+    Right = 2,
+}
 
 export const commands = {
     registerCommand: () => ({ dispose() {} }),
@@ -219,4 +236,5 @@ export default {
     LanguageModelToolResult,
     LanguageModelTextPart,
     extensions,
+    StatusBarAlignment,
 };

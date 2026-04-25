@@ -15,6 +15,7 @@ import { LibsCompletionProvider } from './completion';
 import { LibsDefinitionProvider } from './definition';
 import { LibsHoverProvider } from './hover';
 import { disposeDaemon, getDaemon } from './daemon';
+import { createDaemonStatusItem } from './statusBar';
 import { registerGradleRunTool } from './aiTool';
 
 let output: vscode.OutputChannel;
@@ -33,6 +34,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     const daemon = getDaemon(output);
     context.subscriptions.push({ dispose: () => disposeDaemon() });
+    context.subscriptions.push(createDaemonStatusItem(daemon));
 
     const modulesProvider = new GradleModulesProvider(context.extensionPath);
     const treeView = vscode.window.createTreeView('gradleKotlin.modulesView', {
