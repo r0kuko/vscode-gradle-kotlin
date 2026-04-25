@@ -17,6 +17,17 @@ import { LibsCompletionProvider } from './completion';
 import { LibsDefinitionProvider } from './definition';
 import { LibsHoverProvider } from './hover';
 import { SettingsCodeActionProvider, addSubprojectCommand } from './codeActions';
+import {
+    DependencyCodeActionProvider,
+    cycleDependencyConfigurationCommand,
+    moveLiteralToCatalogCommand,
+} from './extraCodeActions';
+import {
+    GradlePropertiesCompletionProvider,
+    GradlePropertiesHoverProvider,
+    buildPropertiesDiagnostics,
+} from './propertiesProvider';
+import { findDuplicateDependencies, findUnusedPlugins } from './extraDiagnostics';
 import { disposeDaemon, getDaemon, setDefaultInitScriptPath } from './daemon';
 import { createDaemonStatusItem } from './statusBar';
 import { createTestController } from './testController';
@@ -81,7 +92,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const codeLensProvider = new GradleCodeLensProvider();
     const latestResolver = new LatestVersionResolver();
     const inlayProvider = new LibsInlayHintsProvider(() => activeCatalog(), latestResolver);
-    const completionProvider = new LibsCompletionProvider(() => activeCatalog());
+    const completionProvider = new LibsCompletionProvider(
+        () => activeCatalog(),
+        () => {
+            const out: GradleModule[] = [];
+            for (const ws of workspaces.values()) out.push(...ws.modules);
+            return out;
+        }
+    );
     const definitionProvider = new LibsDefinitionProvider(() => activeCatalog());
     const hoverProvider = new LibsHoverProvider(() => activeCatalog());
     const settingsCodeActionProvider = new SettingsCodeActionProvider();
@@ -115,7 +133,56 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.languages.registerCodeActionsProvider(
             { scheme: 'file', pattern: '**/settings.gradle{,.kts}' },
             settingsCodeActionProvider
+        ),
+        vscode.languages.registerCodeActionsProvider(
+            { scheme: 'file', pattern: '**/*.gradle{,.kts}' },
+            new DependencyCodeActionProvider(),
+            { providedCodeActionKinds: DependencyCodeActionProvider.providedKinds }
+        ),
+        vscode.languages.registerHoverProvider(
+            { scheme: 'file', pattern: '**/gradle.properties' },
+            new GradlePropertiesHoverProvider()
+        ),
+        vscode.languages.registerCompletionItemProvider(
+            { scheme: 'file', pattern: '**/gradle.properties' },
+            new GradlePropertiesCompletionProvider(),
+            '.', 'o', 'k', 'a'
         )
+    );
+
+    // Static (synchronous) diagnostics for build scripts and gradle.properties.
+    const staticDiagnostics = vscode.languages.createDiagnosticCollection('gradleKotlin-static');
+    context.subscriptions.push(staticDiagnostics);
+    const refreshStaticDiagnostics = (doc: vscode.TextDocument) => {
+        if (doc.uri.path.endsWith('/gradle.properties')) {
+            staticDiagnostics.set(doc.uri, buildPropertiesDiagnostics(doc));
+            return;
+        }
+        if (!/\.gradle(\.kts)?$/.test(doc.uri.path)) {
+            return;
+        }
+        const text = doc.getText();
+        const items: vscode.Diagnostic[] = [];
+        for (const u of findUnusedPlugins(text)) {
+            const range = new vscode.Range(u.line, u.column, u.line, u.column + u.length);
+            const d = new vscode.Diagnostic(range, u.message, vscode.DiagnosticSeverity.Hint);
+            d.tags = [vscode.DiagnosticTag.Unnecessary];
+            d.source = 'gradleKotlin';
+            items.push(d);
+        }
+        for (const dup of findDuplicateDependencies(text)) {
+            const range = new vscode.Range(dup.line, dup.column, dup.line, dup.column + dup.length);
+            const d = new vscode.Diagnostic(range, dup.message, vscode.DiagnosticSeverity.Warning);
+            d.source = 'gradleKotlin';
+            items.push(d);
+        }
+        staticDiagnostics.set(doc.uri, items);
+    };
+    for (const doc of vscode.workspace.textDocuments) refreshStaticDiagnostics(doc);
+    context.subscriptions.push(
+        vscode.workspace.onDidOpenTextDocument(refreshStaticDiagnostics),
+        vscode.workspace.onDidChangeTextDocument(e => refreshStaticDiagnostics(e.document)),
+        vscode.workspace.onDidCloseTextDocument(doc => staticDiagnostics.delete(doc.uri))
     );
 
     // Commands ----------------------------------------------------------------
@@ -143,6 +210,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     context.subscriptions.push(
         vscode.commands.registerCommand('gradleKotlin.refresh', () => refreshAll(modulesProvider, codeLensProvider, inlayProvider)),
+        vscode.commands.registerCommand('gradleKotlin.cycleDependencyConfiguration', cycleDependencyConfigurationCommand),
+        vscode.commands.registerCommand('gradleKotlin.moveLiteralToCatalog', moveLiteralToCatalogCommand),
         vscode.commands.registerCommand('gradleKotlin.reloadProject', async () => {
             await reloadProject(daemon);
             await refreshAll(modulesProvider, codeLensProvider, inlayProvider);

@@ -1,6 +1,10 @@
 import * as vscode from 'vscode';
 import { VersionCatalog, aliasToLibsRef } from './libs';
 import { isBuildScript } from './codelens';
+import { searchArtifacts, listVersions } from './mavenSearch';
+import { discoverModuleTasksStatically } from './tasks';
+import { findOwningModule } from './tasks';
+import { GradleModule } from './gradle';
 
 /**
  * Completion provider that suggests `libs.x.y.z` aliases (libraries,
@@ -11,23 +15,43 @@ import { isBuildScript } from './codelens';
  * version shown as detail text (matching JetBrains' completion popup).
  */
 export class LibsCompletionProvider implements vscode.CompletionItemProvider {
-    constructor(private readonly catalogProvider: () => VersionCatalog | undefined) {}
+    constructor(
+        private readonly catalogProvider: () => VersionCatalog | undefined,
+        private readonly modulesProvider: () => GradleModule[] = () => []
+    ) {}
 
-    provideCompletionItems(
+    async provideCompletionItems(
         document: vscode.TextDocument,
         position: vscode.Position
-    ): vscode.CompletionItem[] {
+    ): Promise<vscode.CompletionItem[]> {
         if (!isBuildScript(document)) return [];
         const catalog = this.catalogProvider();
-        if (!catalog) return [];
 
         const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
 
-        const pluginCallMatch = /\b(id|kotlin)\s*\(\s*["']([A-Za-z0-9_.-]*)$/.exec(linePrefix);
-        if (pluginCallMatch) {
-            return this.pluginIdCompletions(catalog, pluginCallMatch[1] as 'id' | 'kotlin');
+        // tasks.named<Type>("foo") / tasks.register("foo") name completion.
+        const taskNameMatch = /\btasks\s*\.\s*(?:named|register|create|getByName)\s*(?:<[^>]*>\s*)?\(\s*["']([\w-]*)$/.exec(linePrefix);
+        if (taskNameMatch) {
+            return this.taskNameCompletions(document.uri);
         }
 
+        if (catalog) {
+            const pluginCallMatch = /\b(id|kotlin)\s*\(\s*["']([A-Za-z0-9_.-]*)$/.exec(linePrefix);
+            if (pluginCallMatch) {
+                return this.pluginIdCompletions(catalog, pluginCallMatch[1] as 'id' | 'kotlin');
+            }
+        }
+
+        // Maven Central search inside `<config>("<query>")` literals.
+        const depCallMatch =
+            /\b(implementation|api|compileOnly|runtimeOnly|testImplementation|testRuntimeOnly|androidTestImplementation|kapt|ksp)\s*\(\s*["']([A-Za-z0-9_.\-:]{2,})$/.exec(
+                linePrefix
+            );
+        if (depCallMatch) {
+            return this.mavenCentralCompletions(depCallMatch[2]);
+        }
+
+        if (!catalog) return [];
         const prefixMatch = linePrefix.match(/(?:^|[^A-Za-z_])libs\.([A-Za-z0-9_.-]*)$/);
         if (!prefixMatch) return [];
 
@@ -73,6 +97,44 @@ export class LibsCompletionProvider implements vscode.CompletionItemProvider {
     }
 
     /**
+     * Hit search.maven.org for the user's partial query.  When the
+     * query already contains a `:` we pivot to listing versions for
+     * that exact `group:name` instead of fuzzy-searching the index.
+     */
+    private async mavenCentralCompletions(query: string): Promise<vscode.CompletionItem[]> {
+        try {
+            const colon = query.indexOf(':');
+            const lastColon = query.lastIndexOf(':');
+            if (colon !== -1 && lastColon === colon) {
+                const [g, a] = query.split(':');
+                if (!a) {
+                    const matches = await searchArtifacts(`g:${g}`);
+                    return matches.map(m => completionFor(m.coordinate, `${m.coordinate}:${m.latestVersion}`));
+                }
+                const versions = await listVersions(g, a, 30);
+                return versions.map(v =>
+                    completionFor(v.version, `${g}:${a}:${v.version}`, vscode.CompletionItemKind.Value)
+                );
+            }
+            const matches = await searchArtifacts(query);
+            return matches.map(m => completionFor(m.coordinate, `${m.coordinate}:${m.latestVersion}`));
+        } catch {
+            return [];
+        }
+    }
+
+    private taskNameCompletions(uri: vscode.Uri): vscode.CompletionItem[] {
+        const modules = this.modulesProvider();
+        const owner = findOwningModule(modules, uri.fsPath);
+        if (!owner) return [];
+        return discoverModuleTasksStatically(owner).map(t => {
+            const item = new vscode.CompletionItem(t.name, vscode.CompletionItemKind.Function);
+            item.detail = t.description ?? t.group ?? '';
+            return item;
+        });
+    }
+
+    /**
      * Suggest plugin coordinates from the catalog when the user is typing
      * inside `id("…")` or `kotlin("…")` in a build script.  For
      * `kotlin("…")` we strip the `org.jetbrains.kotlin.` prefix so users
@@ -99,4 +161,15 @@ export class LibsCompletionProvider implements vscode.CompletionItemProvider {
         }
         return items;
     }
+}
+
+function completionFor(
+    label: string,
+    insert: string,
+    kind: vscode.CompletionItemKind = vscode.CompletionItemKind.Module
+): vscode.CompletionItem {
+    const item = new vscode.CompletionItem(label, kind);
+    item.insertText = insert;
+    item.detail = insert;
+    return item;
 }

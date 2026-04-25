@@ -55,7 +55,7 @@ describe('GradleCodeLensProvider', () => {
 describe('LibsCompletionProvider', () => {
     const catalog = parseCatalog(TOML);
 
-    it('offers libs.* aliases when typing after `libs.`', () => {
+    it('offers libs.* aliases when typing after `libs.`', async () => {
         const provider = new LibsCompletionProvider(() => catalog);
         const text = '    implementation(libs.';
         const doc = {
@@ -63,7 +63,7 @@ describe('LibsCompletionProvider', () => {
             getText: () => text,
             lineAt: (_l: number) => ({ text }),
         } as unknown as vscode.TextDocument;
-        const items = provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
+        const items = await provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
         const labels = items.map(i => i.label);
         expect(labels).toContain('libs.kotlinx.coroutines.core');
         expect(labels).toContain('libs.plugins.kotlin.jvm');
@@ -71,7 +71,7 @@ describe('LibsCompletionProvider', () => {
         expect(labels).toContain('libs.versions.coroutines');
     });
 
-    it('returns nothing when the caret is not after `libs.`', () => {
+    it('returns nothing when the caret is not after `libs.`', async () => {
         const provider = new LibsCompletionProvider(() => catalog);
         const text = '    implementation(';
         const doc = {
@@ -79,11 +79,11 @@ describe('LibsCompletionProvider', () => {
             getText: () => text,
             lineAt: (_l: number) => ({ text }),
         } as unknown as vscode.TextDocument;
-        const items = provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
+        const items = await provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
         expect(items).toEqual([]);
     });
 
-    it('completes plugin ids inside id("…")', () => {
+    it('completes plugin ids inside id("…")', async () => {
         const provider = new LibsCompletionProvider(() => catalog);
         const text = 'plugins { id("org.jetbrains';
         const doc = {
@@ -91,12 +91,12 @@ describe('LibsCompletionProvider', () => {
             getText: () => text,
             lineAt: (_l: number) => ({ text }),
         } as unknown as vscode.TextDocument;
-        const items = provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
+        const items = await provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
         const labels = items.map(i => i.label);
         expect(labels).toContain('org.jetbrains.kotlin.jvm');
     });
 
-    it('completes kotlin("jvm") with the short id only', () => {
+    it('completes kotlin("jvm") with the short id only', async () => {
         const provider = new LibsCompletionProvider(() => catalog);
         const text = 'plugins { kotlin("';
         const doc = {
@@ -104,7 +104,7 @@ describe('LibsCompletionProvider', () => {
             getText: () => text,
             lineAt: (_l: number) => ({ text }),
         } as unknown as vscode.TextDocument;
-        const items = provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
+        const items = await provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
         const labels = items.map(i => i.label);
         expect(labels).toContain('jvm');
         expect(labels).not.toContain('org.jetbrains.kotlin.jvm');
