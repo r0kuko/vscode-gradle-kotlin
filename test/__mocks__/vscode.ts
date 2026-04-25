@@ -44,7 +44,19 @@ export class Range {
 }
 
 export class MarkdownString {
-    constructor(public readonly value: string = '') {}
+    isTrusted = false;
+    constructor(public value: string = '') {}
+    appendMarkdown(s: string): this {
+        this.value += s;
+        return this;
+    }
+}
+
+export class Hover {
+    constructor(
+        public readonly contents: MarkdownString | MarkdownString[],
+        public readonly range?: Range
+    ) {}
 }
 
 export class CodeLens {
@@ -164,6 +176,8 @@ export const languages = {
     registerCodeLensProvider: () => ({ dispose() {} }),
     registerInlayHintsProvider: () => ({ dispose() {} }),
     registerCompletionItemProvider: () => ({ dispose() {} }),
+    registerDefinitionProvider: () => ({ dispose() {} }),
+    registerHoverProvider: () => ({ dispose() {} }),
 };
 
 export const lm = {
@@ -186,6 +200,7 @@ export default {
     Position,
     Range,
     MarkdownString,
+    Hover,
     CodeLens,
     CompletionItem,
     CompletionItemKind,

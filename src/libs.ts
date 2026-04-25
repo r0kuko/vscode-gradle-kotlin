@@ -363,6 +363,78 @@ export interface LibsReference {
 
 const LIBS_REF_RE = /\blibs\.(?:[A-Za-z_][\w]*)(?:\.[A-Za-z_][\w]*)*/g;
 
+/**
+ * Find the `libs.x.y` reference, if any, that contains `(line, character)`.
+ * Used by the hover/definition providers.
+ */
+export function findLibsReferenceAt(
+    text: string,
+    line: number,
+    character: number
+): LibsReference | undefined {
+    const lineText = text.split(/\r?\n/)[line];
+    if (!lineText) return undefined;
+    LIBS_REF_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = LIBS_REF_RE.exec(lineText)) !== null) {
+        if (character >= m.index && character <= m.index + m[0].length) {
+            return { ref: m[0], line, character: m.index, length: m[0].length };
+        }
+    }
+    return undefined;
+}
+
+/**
+ * Find the source-file line of a resolved alias inside a parsed catalog.
+ * Returns -1 when the alias cannot be located.
+ */
+export function locateAliasLine(
+    catalog: VersionCatalog,
+    resolution: LibsResolution
+): number {
+    switch (resolution.kind) {
+        case 'library':
+            return catalog.libraries.get(resolution.alias)?.line ?? -1;
+        case 'plugin':
+            return catalog.plugins.get(resolution.alias)?.line ?? -1;
+        case 'version':
+            // Versions don't store a line; scan the file for `<alias> =`.
+            return findVersionLine(catalog, resolution.alias);
+        case 'bundle':
+            return findBundleLine(catalog, resolution.alias);
+    }
+}
+
+function findVersionLine(catalog: VersionCatalog, alias: string): number {
+    return scanFileForAlias(catalog.file, /^\s*\[versions\]\s*$/, alias);
+}
+
+function findBundleLine(catalog: VersionCatalog, alias: string): number {
+    return scanFileForAlias(catalog.file, /^\s*\[bundles\]\s*$/, alias);
+}
+
+function scanFileForAlias(file: string, sectionRe: RegExp, alias: string): number {
+    try {
+        const text = fs.readFileSync(file, 'utf8');
+        const lines = text.split(/\r?\n/);
+        let inSection = false;
+        for (let i = 0; i < lines.length; i++) {
+            const l = lines[i];
+            if (/^\s*\[/.test(l)) {
+                inSection = sectionRe.test(l);
+                continue;
+            }
+            if (inSection) {
+                const kv = l.match(/^\s*([A-Za-z0-9_.-]+)\s*=/);
+                if (kv && kv[1] === alias) return i;
+            }
+        }
+    } catch {
+        /* ignore */
+    }
+    return -1;
+}
+
 export function findLibsReferences(text: string): LibsReference[] {
     const out: LibsReference[] = [];
     const lines = text.split(/\r?\n/);

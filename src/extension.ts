@@ -12,6 +12,8 @@ import { GradleModulesProvider, ModuleTreeItemData } from './treeProvider';
 import { GradleCodeLensProvider } from './codelens';
 import { LibsInlayHintsProvider } from './inlayHints';
 import { LibsCompletionProvider } from './completion';
+import { LibsDefinitionProvider } from './definition';
+import { LibsHoverProvider } from './hover';
 import { disposeDaemon, getDaemon } from './daemon';
 import { registerGradleRunTool } from './aiTool';
 
@@ -42,6 +44,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const codeLensProvider = new GradleCodeLensProvider();
     const inlayProvider = new LibsInlayHintsProvider(() => activeCatalog());
     const completionProvider = new LibsCompletionProvider(() => activeCatalog());
+    const definitionProvider = new LibsDefinitionProvider(() => activeCatalog());
+    const hoverProvider = new LibsHoverProvider(() => activeCatalog());
 
     context.subscriptions.push(
         vscode.languages.registerCodeLensProvider(
@@ -56,6 +60,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             { scheme: 'file', pattern: '**/*.gradle{,.kts}' },
             completionProvider,
             '.'
+        ),
+        vscode.languages.registerDefinitionProvider(
+            { scheme: 'file', pattern: '**/*.gradle{,.kts}' },
+            definitionProvider
+        ),
+        vscode.languages.registerHoverProvider(
+            { scheme: 'file', pattern: '**/*.gradle{,.kts}' },
+            hoverProvider
         )
     );
 
