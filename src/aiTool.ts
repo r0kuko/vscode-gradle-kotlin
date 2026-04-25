@@ -4,6 +4,7 @@ import { GradleDaemon } from './daemon';
 import { GradleModule } from './gradle';
 import { qualifyTask, parseTasksAllOutput } from './tasks';
 import { findCatalogFile, parseCatalogFile } from './libs';
+import { searchArtifacts } from './mavenSearch';
 
 /**
  * Input schema declared in package.json under `languageModelTools`.
@@ -24,6 +25,45 @@ export interface GradleDependenciesToolInput {
 }
 
 export interface LibsCatalogReadToolInput {}
+
+export interface GradleDependencySearchToolInput {
+    query: string;
+    rows?: number;
+}
+
+/**
+ * Free-text Maven Central search exposed to Copilot — the model can
+ * use it to suggest accurate dependency coordinates without
+ * hallucinating versions.
+ */
+export class GradleDependencySearchTool
+    implements vscode.LanguageModelTool<GradleDependencySearchToolInput>
+{
+    async prepareInvocation(
+        options: vscode.LanguageModelToolInvocationPrepareOptions<GradleDependencySearchToolInput>
+    ): Promise<vscode.PreparedToolInvocation> {
+        return {
+            invocationMessage: `Searching Maven Central for "${options.input.query}"`,
+        };
+    }
+
+    async invoke(
+        options: vscode.LanguageModelToolInvocationOptions<GradleDependencySearchToolInput>
+    ): Promise<vscode.LanguageModelToolResult> {
+        const matches = await searchArtifacts(options.input.query, options.input.rows ?? 20);
+        if (matches.length === 0) {
+            return new vscode.LanguageModelToolResult([
+                new vscode.LanguageModelTextPart(`No Maven Central matches for "${options.input.query}".`),
+            ]);
+        }
+        const payload = matches.map(m => ({
+            coordinate: m.coordinate,
+            latestVersion: m.latestVersion,
+            gradleKts: `implementation("${m.coordinate}:${m.latestVersion}")`,
+        }));
+        return toolResult(payload);
+    }
+}
 
 /**
  * Implementation of the `gradle_run` Copilot tool.  Always reuses the
@@ -281,7 +321,8 @@ export function registerGradleRunTool(
             'gradle_dependencies',
             new GradleDependenciesTool(daemon, modulesProvider)
         ),
-        lm.registerTool('libs_catalog_read', new LibsCatalogReadTool(modulesProvider))
+        lm.registerTool('libs_catalog_read', new LibsCatalogReadTool(modulesProvider)),
+        lm.registerTool('gradle_dependency_search', new GradleDependencySearchTool())
     );
 }
 

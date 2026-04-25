@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { isBuildScript } from './codelens';
 import { VersionCatalog, findLibsReferenceAt, resolveLibsRef } from './libs';
+import { guessGitHubRepo } from './mavenSearch';
 
 /**
  * Hover provider showing coordinate / version / bundle membership for
@@ -26,6 +27,16 @@ export class LibsHoverProvider implements vscode.HoverProvider {
         const md = new vscode.MarkdownString();
         md.isTrusted = true;
         md.appendMarkdown(`**${ref.ref}** — ${resolution.kind}\n\n${resolution.tooltip}`);
+        if (resolution.kind === 'library') {
+            const lib = catalog.libraries.get(resolution.alias);
+            if (lib) {
+                const [group, name] = lib.coordinate.split(':');
+                const repo = guessGitHubRepo(group, name);
+                if (repo) {
+                    md.appendMarkdown(`\n\n[View on GitHub](https://github.com/${repo}) · [Maven Central](https://central.sonatype.com/artifact/${group}/${name})`);
+                }
+            }
+        }
         const range = new vscode.Range(
             ref.line,
             ref.character,

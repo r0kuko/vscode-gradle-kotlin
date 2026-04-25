@@ -368,6 +368,24 @@
           "type": "object",
           "properties": {}
         }
+      },
+      {
+        "name": "gradle_dependency_search",
+        "displayName": "Search Maven Central",
+        "modelDescription": "Search Maven Central for Gradle dependency coordinates and the latest version. Returns ready-to-paste implementation(\"…\") snippets so the model never has to guess versions.",
+        "userDescription": "Queries Maven Central for matching dependencies.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "gradleDependencySearch",
+        "icon": "$(search)",
+        "tags": ["gradle", "maven", "search"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string", "description": "Free-text search term, e.g. 'ktor server core' or 'g:io.ktor a:ktor-server-core'." },
+            "rows": { "type": "integer", "description": "Maximum results to return (default 20)." }
+          },
+          "required": ["query"]
+        }
       }
     ]
   },
