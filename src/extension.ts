@@ -22,6 +22,7 @@ import { createDaemonStatusItem } from './statusBar';
 import { createTestController } from './testController';
 import { registerGradleRunTool } from './aiTool';
 import { RecentRun, pushRecent } from './history';
+import { splitArgs } from './argSplit';
 
 const HISTORY_KEY = 'gradleKotlin.recentRuns';
 
@@ -463,18 +464,6 @@ async function runTaskCommand(
         exitCode: result.exitCode,
         durationMs: result.durationMs,
     });
-}
-
-/**
- * Split a CLI argument string while respecting double quotes.  Good
- * enough for the gradle args the user types in the input box.
- */
-function splitArgs(input: string): string[] {
-    const out: string[] = [];
-    const re = /"([^"]*)"|(\S+)/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(input)) !== null) out.push(m[1] ?? m[2]);
-    return out;
 }
 
 async function runTestsForTask(
