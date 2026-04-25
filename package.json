@@ -25,7 +25,8 @@
     "workspaceContains:**/build.gradle",
     "workspaceContains:**/settings.gradle.kts",
     "workspaceContains:**/settings.gradle",
-    "onLanguage:kotlin"
+    "workspaceContains:**/gradle/libs.versions.toml",
+    "workspaceContains:**/gradlew"
   ],
   "main": "./out/extension.js",
   "icon": "images/icon.png",
@@ -211,6 +212,28 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        { "command": "gradleKotlin.refresh", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.reloadProject", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.upgradeWrapper", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.runTask", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.runTaskWithArgs", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.runTestsForTask", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.rerunRecent", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.clearRecent", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.runDependencies", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.addSubproject", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.openModule", "when": "false" },
+        { "command": "gradleKotlin.stopDaemon", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.pinTask", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.runPinned", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.runAlias", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.runMany", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.runTaskContinuous", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.toggleWrapperDistribution", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.cycleDependencyConfiguration", "when": "gradleKotlin.isGradleProject" },
+        { "command": "gradleKotlin.moveLiteralToCatalog", "when": "gradleKotlin.isGradleProject" }
+      ],
       "view/title": [
         {
           "command": "gradleKotlin.refresh",
@@ -269,7 +292,8 @@
           "id": "gradleKotlin.modulesView",
           "name": "Gradle Modules",
           "icon": "images/icons/gradle.svg",
-          "contextualTitle": "Gradle"
+          "contextualTitle": "Gradle",
+          "when": "gradleKotlin.isGradleProject"
         }
       ]
     },

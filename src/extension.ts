@@ -468,6 +468,11 @@ async function refreshAll(
         workspaces.set(root, { folder, modules, catalog });
         treeProvider.setModules(root, modules);
     }
+    void vscode.commands.executeCommand(
+        'setContext',
+        'gradleKotlin.isGradleProject',
+        workspaces.size > 0
+    );
     codeLensProvider.refresh();
     inlayProvider.refresh();
 }
