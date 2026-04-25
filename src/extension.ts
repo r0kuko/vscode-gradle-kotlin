@@ -138,7 +138,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.commands.registerCommand('gradleKotlin.rerunRecent', async (run: RecentRun) => {
             if (!run) return;
-            output.show(true);
             const result = await runWithProgress(
                 daemon,
                 `Gradle: ${run.task}`,
@@ -326,7 +325,6 @@ async function reloadProject(daemon: ReturnType<typeof getDaemon>): Promise<void
         vscode.window.showInformationMessage('No Gradle workspace detected.');
         return;
     }
-    output.show(true);
     output.appendLine(`\n=== Reloading Gradle project at ${folder.uri.fsPath} ===`);
     await runWithProgress(
         daemon,
@@ -334,7 +332,6 @@ async function reloadProject(daemon: ReturnType<typeof getDaemon>): Promise<void
         { workspaceRoot: folder.uri.fsPath, args: ['help', '--quiet'] }
     );
 }
-
 /**
  * Pick the most relevant workspace folder for a command:
  *  1. The folder owning the explicit `target` (tree node / task), when given.
@@ -450,7 +447,6 @@ async function runTaskCommand(
         extraArgs = input.trim().length > 0 ? splitArgs(input) : [];
     }
 
-    output.show(true);
     const result = await runWithProgress(
         daemon,
         `Gradle: ${qualified}`,
@@ -497,7 +493,6 @@ async function runTestsForTask(
 
     const qualified = qualifyTask(task.projectPath, task.name);
     const args = [qualified, '--tests', pattern.trim()];
-    output.show(true);
     const result = await runWithProgress(
         daemon,
         `Gradle: ${qualified} --tests ${pattern.trim()}`,
@@ -526,7 +521,6 @@ async function runDependencies(
     const owning = findOwningModule(ws.modules, path.dirname(targetUri.fsPath));
     const module = owning ?? ws.modules[0];
     const qualified = qualifyTask(module.projectPath, 'dependencies');
-    output.show(true);
     await runWithProgress(
         daemon,
         `Gradle: ${qualified}`,

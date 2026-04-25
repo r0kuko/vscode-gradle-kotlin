@@ -11,6 +11,7 @@ import { LatestVersionResolver } from './latestVersion';
 export class LibsInlayHintsProvider implements vscode.InlayHintsProvider {
     private readonly _onDidChange = new vscode.EventEmitter<void>();
     readonly onDidChangeInlayHints = this._onDidChange.event;
+    private fireTimer: ReturnType<typeof setTimeout> | undefined;
 
     constructor(
         private readonly catalogProvider: () => VersionCatalog | undefined,
@@ -18,7 +19,13 @@ export class LibsInlayHintsProvider implements vscode.InlayHintsProvider {
     ) {}
 
     refresh(): void {
-        this._onDidChange.fire();
+        // Debounce so a stream of file watcher events / config changes
+        // doesn't trigger N inlay-hint passes back-to-back.
+        if (this.fireTimer) clearTimeout(this.fireTimer);
+        this.fireTimer = setTimeout(() => {
+            this.fireTimer = undefined;
+            this._onDidChange.fire();
+        }, 100);
     }
 
     async provideInlayHints(

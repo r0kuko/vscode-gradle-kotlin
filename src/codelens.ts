@@ -10,9 +10,14 @@ import { findDependenciesBlock } from './tasks';
 export class GradleCodeLensProvider implements vscode.CodeLensProvider {
     private readonly _onDidChange = new vscode.EventEmitter<void>();
     readonly onDidChangeCodeLenses = this._onDidChange.event;
+    private fireTimer: ReturnType<typeof setTimeout> | undefined;
 
     refresh(): void {
-        this._onDidChange.fire();
+        if (this.fireTimer) clearTimeout(this.fireTimer);
+        this.fireTimer = setTimeout(() => {
+            this.fireTimer = undefined;
+            this._onDidChange.fire();
+        }, 100);
     }
 
     provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
