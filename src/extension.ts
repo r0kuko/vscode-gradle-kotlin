@@ -17,6 +17,9 @@ import { LibsHoverProvider } from './hover';
 import { disposeDaemon, getDaemon } from './daemon';
 import { createDaemonStatusItem } from './statusBar';
 import { registerGradleRunTool } from './aiTool';
+import { RecentRun, pushRecent } from './history';
+
+const HISTORY_KEY = 'gradleKotlin.recentRuns';
 
 let output: vscode.OutputChannel;
 
@@ -74,6 +77,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     // Commands ----------------------------------------------------------------
+    const recentByWorkspace = new Map<string, RecentRun[]>();
+    const loadRecent = (): RecentRun[] =>
+        context.workspaceState.get<RecentRun[]>(HISTORY_KEY, []) ?? [];
+    for (const r of loadRecent()) {
+        const list = recentByWorkspace.get(r.workspaceRoot) ?? [];
+        list.push(r);
+        recentByWorkspace.set(r.workspaceRoot, list);
+    }
+    for (const [ws, list] of recentByWorkspace) modulesProvider.setRecent(ws, list);
+
+    const recordRun = async (run: RecentRun) => {
+        const merged = pushRecent(loadRecent(), run);
+        await context.workspaceState.update(HISTORY_KEY, merged);
+        const grouped = new Map<string, RecentRun[]>();
+        for (const r of merged) {
+            const list = grouped.get(r.workspaceRoot) ?? [];
+            list.push(r);
+            grouped.set(r.workspaceRoot, list);
+        }
+        for (const [ws, list] of grouped) modulesProvider.setRecent(ws, list);
+    };
+
     context.subscriptions.push(
         vscode.commands.registerCommand('gradleKotlin.refresh', () => refreshAll(modulesProvider, codeLensProvider, inlayProvider)),
         vscode.commands.registerCommand('gradleKotlin.reloadProject', async () => {
@@ -81,7 +106,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
         }),
         vscode.commands.registerCommand('gradleKotlin.runTask', async (target: ModuleTreeItemData | GradleTask | undefined) => {
-            await runTaskCommand(daemon, target);
+            await runTaskCommand(daemon, target, recordRun);
+        }),
+        vscode.commands.registerCommand('gradleKotlin.runTaskWithArgs', async (target: ModuleTreeItemData | GradleTask | undefined) => {
+            await runTaskCommand(daemon, target, recordRun, { promptForArgs: true });
+        }),
+        vscode.commands.registerCommand('gradleKotlin.rerunRecent', async (run: RecentRun) => {
+            if (!run) return;
+            output.show(true);
+            const result = await daemon.run({
+                workspaceRoot: run.workspaceRoot,
+                args: [run.task, ...run.args],
+            });
+            await recordRun({
+                ...run,
+                timestamp: Date.now(),
+                exitCode: result.exitCode,
+                durationMs: result.durationMs,
+            });
+        }),
+        vscode.commands.registerCommand('gradleKotlin.clearRecent', async () => {
+            await context.workspaceState.update(HISTORY_KEY, []);
+            for (const ws of recentByWorkspace.keys()) modulesProvider.setRecent(ws, []);
         }),
         vscode.commands.registerCommand('gradleKotlin.runDependencies', async (uri?: vscode.Uri) => {
             await runDependencies(daemon, uri);
@@ -186,7 +232,9 @@ async function reloadProject(daemon: ReturnType<typeof getDaemon>): Promise<void
 
 async function runTaskCommand(
     daemon: ReturnType<typeof getDaemon>,
-    target: ModuleTreeItemData | GradleTask | undefined
+    target: ModuleTreeItemData | GradleTask | undefined,
+    recordRun: (r: RecentRun) => Promise<void>,
+    options: { promptForArgs?: boolean } = {}
 ): Promise<void> {
     const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) return;
@@ -208,8 +256,41 @@ async function runTaskCommand(
         qualified = taskName.startsWith(':') ? taskName : ':' + taskName;
     }
 
+    let extraArgs: string[] = [];
+    if (options.promptForArgs) {
+        const input = await vscode.window.showInputBox({
+            prompt: `Extra arguments for ${qualified}`,
+            placeHolder: '--info --tests "*MyTest*" -Pfoo=bar',
+        });
+        if (input === undefined) return;
+        extraArgs = input.trim().length > 0 ? splitArgs(input) : [];
+    }
+
     output.show(true);
-    await daemon.run({ workspaceRoot: folder.uri.fsPath, args: [qualified] });
+    const result = await daemon.run({
+        workspaceRoot: folder.uri.fsPath,
+        args: [qualified, ...extraArgs],
+    });
+    await recordRun({
+        task: qualified,
+        args: extraArgs,
+        workspaceRoot: folder.uri.fsPath,
+        timestamp: Date.now(),
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+    });
+}
+
+/**
+ * Split a CLI argument string while respecting double quotes.  Good
+ * enough for the gradle args the user types in the input box.
+ */
+function splitArgs(input: string): string[] {
+    const out: string[] = [];
+    const re = /"([^"]*)"|(\S+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(input)) !== null) out.push(m[1] ?? m[2]);
+    return out;
 }
 
 async function runDependencies(

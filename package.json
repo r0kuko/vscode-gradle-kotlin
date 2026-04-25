@@ -90,6 +90,24 @@
         "icon": "$(play)"
       },
       {
+        "command": "gradleKotlin.runTaskWithArgs",
+        "title": "Gradle: Run Task with Arguments…",
+        "category": "Gradle Kotlin",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "gradleKotlin.rerunRecent",
+        "title": "Gradle: Re-run Recent",
+        "category": "Gradle Kotlin",
+        "icon": "$(debug-rerun)"
+      },
+      {
+        "command": "gradleKotlin.clearRecent",
+        "title": "Gradle: Clear Recent Runs",
+        "category": "Gradle Kotlin",
+        "icon": "$(trash)"
+      },
+      {
         "command": "gradleKotlin.runDependencies",
         "title": "Gradle: Show Dependencies",
         "category": "Gradle Kotlin",
@@ -117,6 +135,11 @@
           "command": "gradleKotlin.reloadProject",
           "when": "view == gradleKotlin.modulesView",
           "group": "navigation"
+        },
+        {
+          "command": "gradleKotlin.clearRecent",
+          "when": "view == gradleKotlin.modulesView",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -126,8 +149,18 @@
           "group": "inline"
         },
         {
+          "command": "gradleKotlin.runTaskWithArgs",
+          "when": "view == gradleKotlin.modulesView && viewItem == gradleTask",
+          "group": "inline@2"
+        },
+        {
           "command": "gradleKotlin.openModule",
           "when": "view == gradleKotlin.modulesView && viewItem == gradleModule",
+          "group": "inline"
+        },
+        {
+          "command": "gradleKotlin.rerunRecent",
+          "when": "view == gradleKotlin.modulesView && viewItem == gradleRecentRun",
           "group": "inline"
         }
       ],

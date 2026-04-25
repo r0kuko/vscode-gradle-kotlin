@@ -2,19 +2,29 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { GradleModule, ModuleTreeNode, buildModuleTreeShape } from './gradle';
 import { GradleTask, discoverModuleTasksStatically } from './tasks';
+import { RecentRun, recentLabel } from './history';
 
 /**
  * Per-tree-item metadata. Keeping this off the TreeItem itself lets us
  * recreate the visible nodes cheaply on every refresh while still mapping
  * commands back to the underlying module/task.
  */
-export type TreeNodeKind = 'workspace' | 'module' | 'group' | 'tasksFolder' | 'task';
+export type TreeNodeKind =
+    | 'workspace'
+    | 'module'
+    | 'group'
+    | 'tasksFolder'
+    | 'task'
+    | 'recentFolder'
+    | 'recentRun';
 
 export interface ModuleTreeItemData {
     kind: TreeNodeKind;
     workspaceRoot: string;
     module?: GradleModule;
     task?: GradleTask;
+    /** Recent run payload for kind === 'recentRun'. */
+    recent?: RecentRun;
     /** For "group" nodes that are not real modules. */
     label?: string;
     /** Stable id for VS Code's TreeView reveal/refresh APIs. */
@@ -42,11 +52,17 @@ export class GradleModulesProvider
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     private modulesByWorkspace = new Map<string, GradleModule[]>();
+    private recentByWorkspace = new Map<string, RecentRun[]>();
 
     constructor(private readonly extensionPath: string) {}
 
     setModules(workspaceRoot: string, modules: GradleModule[]): void {
         this.modulesByWorkspace.set(workspaceRoot, modules);
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    setRecent(workspaceRoot: string, runs: RecentRun[]): void {
+        this.recentByWorkspace.set(workspaceRoot, runs);
         this._onDidChangeTreeData.fire(undefined);
     }
 
@@ -86,6 +102,26 @@ export class GradleModulesProvider
             case 'tasksFolder':
                 item.iconPath = new vscode.ThemeIcon('list-tree');
                 break;
+            case 'recentFolder':
+                item.iconPath = new vscode.ThemeIcon('history');
+                item.tooltip = 'Recently run Gradle tasks';
+                break;
+            case 'recentRun':
+                item.iconPath = new vscode.ThemeIcon('debug-rerun');
+                item.description = element.recent
+                    ? new Date(element.recent.timestamp).toLocaleTimeString()
+                    : '';
+                item.tooltip =
+                    element.recent &&
+                    `${recentLabel(element.recent)}\nlast exit: ${element.recent.exitCode ?? '?'}`;
+                if (element.recent) {
+                    item.command = {
+                        command: 'gradleKotlin.rerunRecent',
+                        title: 'Re-run',
+                        arguments: [element.recent],
+                    };
+                }
+                break;
             case 'task':
                 item.iconPath = new vscode.ThemeIcon('play');
                 item.description = element.task?.group;
@@ -105,6 +141,14 @@ export class GradleModulesProvider
             // Top level: one workspace node per workspace folder, with the root module's tasks under it.
             const out: ModuleTreeItemData[] = [];
             for (const [workspaceRoot, modules] of this.modulesByWorkspace) {
+                const recent = this.recentByWorkspace.get(workspaceRoot) ?? [];
+                if (recent.length > 0) {
+                    out.push({
+                        kind: 'recentFolder',
+                        workspaceRoot,
+                        id: `${workspaceRoot}::recent`,
+                    });
+                }
                 const shape = buildModuleTreeShape(modules);
                 out.push(...this.materializeShape(shape, workspaceRoot, undefined));
             }
@@ -154,6 +198,16 @@ export class GradleModulesProvider
                     id: `${element.id}::${t.name}`,
                 }));
             }
+            case 'recentFolder': {
+                const recent = this.recentByWorkspace.get(element.workspaceRoot) ?? [];
+                return recent.map((r, idx) => ({
+                    kind: 'recentRun',
+                    workspaceRoot: element.workspaceRoot,
+                    recent: r,
+                    id: `${element.id}::${idx}::${r.task}`,
+                }));
+            }
+            case 'recentRun':
             case 'task':
                 return [];
         }
@@ -195,6 +249,10 @@ export class GradleModulesProvider
                 return d.label?.split(':').filter(Boolean).pop() ?? '';
             case 'tasksFolder':
                 return 'Tasks';
+            case 'recentFolder':
+                return 'Recent';
+            case 'recentRun':
+                return d.recent ? recentLabel(d.recent) : '';
             case 'task':
                 return d.task?.name ?? '';
         }
@@ -203,8 +261,10 @@ export class GradleModulesProvider
     private collapsibleFor(d: ModuleTreeItemData): vscode.TreeItemCollapsibleState {
         switch (d.kind) {
             case 'task':
+            case 'recentRun':
                 return vscode.TreeItemCollapsibleState.None;
             case 'workspace':
+            case 'recentFolder':
                 return vscode.TreeItemCollapsibleState.Expanded;
             default:
                 return vscode.TreeItemCollapsibleState.Collapsed;
@@ -220,6 +280,10 @@ export class GradleModulesProvider
                 return 'gradleTask';
             case 'tasksFolder':
                 return 'gradleTasksFolder';
+            case 'recentFolder':
+                return 'gradleRecentFolder';
+            case 'recentRun':
+                return 'gradleRecentRun';
             case 'group':
                 return 'gradleGroup';
         }
