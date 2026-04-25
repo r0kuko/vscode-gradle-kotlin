@@ -3,7 +3,7 @@ import { GradleDaemon } from './daemon';
 
 /**
  * Tiny status-bar item that mirrors the Gradle daemon's activity.
- *  - idle      → `$(server) Gradle`
+ *  - idle      → `$(rocket) Gradle`
  *  - running   → `$(sync~spin) Gradle: <task>`
  * Clicking it stops the daemon.
  */
@@ -16,7 +16,7 @@ export function createDaemonStatusItem(daemon: GradleDaemon): vscode.StatusBarIt
         if (daemon.running > 0) {
             item.text = `$(sync~spin) Gradle${lastTask ? ': ' + lastTask : ''}`;
         } else {
-            item.text = '$(server) Gradle';
+            item.text = '$(rocket) Gradle';
         }
     };
     render();
