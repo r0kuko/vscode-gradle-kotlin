@@ -42,6 +42,38 @@ const TASK_REGISTER_RE =
 const TOP_LEVEL_TASK_RE = /\btask\s*(?:<[^>]+>\s*)?\(\s*["']([A-Za-z_][\w]*)["']/g;
 
 /**
+ * Look at the first 600 chars after a `tasks.register("foo")` match and
+ * extract the closest `description = "..."` and `group = "..."`
+ * assignments.  Both Kotlin DSL (`description = "x"`) and Groovy
+ * (`description "x"`) forms are accepted.  This is intentionally naive
+ * — anything fancier needs the actual Gradle Tooling API.
+ */
+function extractTaskMeta(text: string, fromIndex: number): { description?: string; group?: string } {
+    const window = text.slice(fromIndex, fromIndex + 600);
+    // Stop at the matching closing brace of the register-block; if we
+    // can't find one, just look in the entire window.
+    const braceOpen = window.indexOf('{');
+    let scope = window;
+    if (braceOpen !== -1) {
+        let depth = 0;
+        for (let i = braceOpen; i < window.length; i++) {
+            const ch = window[i];
+            if (ch === '{') depth++;
+            else if (ch === '}') {
+                depth--;
+                if (depth === 0) {
+                    scope = window.slice(braceOpen, i + 1);
+                    break;
+                }
+            }
+        }
+    }
+    const desc = /\bdescription\s*(?:=|\s)\s*["']([^"']+)["']/.exec(scope)?.[1];
+    const group = /\bgroup\s*(?:=|\s)\s*["']([^"']+)["']/.exec(scope)?.[1];
+    return { description: desc, group };
+}
+
+/**
  * Statically scan a module's build script for declared task names.
  * Adds standard Gradle built-ins so the sidebar always shows something
  * useful even before the daemon has run `tasks --all`.
@@ -66,11 +98,13 @@ export function discoverModuleTasksStatically(module: GradleModule): GradleTask[
             let m: RegExpExecArray | null;
             while ((m = re.exec(text)) !== null) {
                 const name = m[1];
+                const meta = extractTaskMeta(text, m.index + m[0].length);
                 seen.set(name, {
                     name,
                     projectPath: module.projectPath,
+                    description: meta.description,
                     fromScript: true,
-                    group: 'other',
+                    group: meta.group ?? 'other',
                 });
             }
         }

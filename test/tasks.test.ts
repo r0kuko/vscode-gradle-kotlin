@@ -56,6 +56,20 @@ describe('discoverModuleTasksStatically', () => {
         const names = discoverModuleTasksStatically(m).map(t => t.name);
         expect(names).toContain('hello');
     });
+
+    it('extracts description and group from a tasks.register block', () => {
+        const file = tmpFile(
+            'build.gradle.kts',
+            'tasks.register("integrationTest") {\n' +
+                '    description = "Runs the integration test suite."\n' +
+                '    group = "verification"\n' +
+                '}\n'
+        );
+        const m = baseModule({ buildScript: file });
+        const t = discoverModuleTasksStatically(m).find(x => x.name === 'integrationTest');
+        expect(t?.description).toBe('Runs the integration test suite.');
+        expect(t?.group).toBe('verification');
+    });
 });
 
 describe('parseTasksAllOutput', () => {
