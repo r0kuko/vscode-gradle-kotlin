@@ -406,8 +406,26 @@ function runWithProgress(
             title,
             cancellable: true,
         },
-        (_progress, token) =>
-            daemon.run({ ...request, token })
+        (progress, token) => {
+            let buf = '';
+            return daemon.run({
+                ...request,
+                token,
+                onOutput: chunk => {
+                    buf += chunk;
+                    // Keep only the trailing tail — we just want the most
+                    // recent non-empty line as a progress message.
+                    if (buf.length > 4096) buf = buf.slice(-4096);
+                    const lines = buf.split(/\r?\n/);
+                    for (let i = lines.length - 1; i >= 0; i--) {
+                        const line = lines[i].trim();
+                        if (!line) continue;
+                        progress.report({ message: line.length > 120 ? line.slice(0, 117) + '…' : line });
+                        break;
+                    }
+                },
+            });
+        }
     );
 }
 

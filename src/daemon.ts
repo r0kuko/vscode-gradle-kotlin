@@ -21,6 +21,8 @@ export interface DaemonRunRequest {
     args: string[];
     /** Optional cancellation. */
     token?: vscode.CancellationToken;
+    /** Called for every stdout/stderr chunk while the child is running. */
+    onOutput?: (chunk: string, source: 'stdout' | 'stderr') => void;
 }
 
 export interface DaemonRunResult {
@@ -124,12 +126,14 @@ export class GradleDaemon implements vscode.Disposable {
                 if (stdout.length < MAX_BUFFER) stdout += s;
                 if (combined.length < MAX_BUFFER) combined += s;
                 this.output.append(s);
+                req.onOutput?.(s, 'stdout');
             });
             child.stderr.on('data', (b: Buffer) => {
                 const s = b.toString();
                 if (stderr.length < MAX_BUFFER) stderr += s;
                 if (combined.length < MAX_BUFFER) combined += s;
                 this.output.append(s);
+                req.onOutput?.(s, 'stderr');
             });
             child.on('error', err => {
                 cancel?.dispose();
