@@ -1,0 +1,214 @@
+{
+  "name": "vscode-gradle-kotlin",
+  "displayName": "Gradle Kotlin Companion",
+  "description": "JetBrains-style Gradle/Kotlin DSL experience for VS Code: module tree, run tasks, reload-project actions, libs.versions.toml inlay hints & completion, and a long-lived Gradle daemon exposed as a Copilot tool.",
+  "version": "0.1.0",
+  "publisher": "r0kuko",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other",
+    "AI"
+  ],
+  "keywords": [
+    "kotlin",
+    "gradle",
+    "build.gradle.kts",
+    "libs.versions.toml",
+    "version catalog"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/build.gradle.kts",
+    "workspaceContains:**/build.gradle",
+    "workspaceContains:**/settings.gradle.kts",
+    "workspaceContains:**/settings.gradle",
+    "onLanguage:kotlin"
+  ],
+  "main": "./out/extension.js",
+  "icon": "images/icon.png",
+  "contributes": {
+    "configuration": {
+      "title": "Gradle Kotlin Companion",
+      "properties": {
+        "gradleKotlin.gradleCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Override the Gradle command. Defaults to ./gradlew (or gradlew.bat on Windows) if a wrapper is found, otherwise 'gradle'."
+        },
+        "gradleKotlin.versionInlayHints.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline ghost-text version hints next to libs.x.y references."
+        },
+        "gradleKotlin.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show 'Reload project' / 'Run dependencies' code lens above build.gradle.kts."
+        },
+        "gradleKotlin.daemon.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep a long-lived Gradle daemon (via --daemon) and expose it to Copilot through the language-model tool 'gradle_run'."
+        }
+      }
+    },
+    "languages": [
+      {
+        "id": "kotlin",
+        "extensions": [".kt", ".kts"],
+        "aliases": ["Kotlin"]
+      },
+      {
+        "id": "toml",
+        "extensions": [".toml"],
+        "aliases": ["TOML"]
+      }
+    ],
+    "commands": [
+      {
+        "command": "gradleKotlin.refresh",
+        "title": "Gradle: Refresh Modules",
+        "category": "Gradle Kotlin",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gradleKotlin.reloadProject",
+        "title": "Gradle: Reload Project",
+        "category": "Gradle Kotlin",
+        "icon": {
+          "light": "images/icons/gradleLoadChanges.svg",
+          "dark": "images/icons/gradleLoadChanges_dark.svg"
+        }
+      },
+      {
+        "command": "gradleKotlin.runTask",
+        "title": "Gradle: Run Task",
+        "category": "Gradle Kotlin",
+        "icon": "$(play)"
+      },
+      {
+        "command": "gradleKotlin.runDependencies",
+        "title": "Gradle: Show Dependencies",
+        "category": "Gradle Kotlin",
+        "icon": "$(symbol-package)"
+      },
+      {
+        "command": "gradleKotlin.openModule",
+        "title": "Gradle: Open Module Build File",
+        "category": "Gradle Kotlin"
+      },
+      {
+        "command": "gradleKotlin.stopDaemon",
+        "title": "Gradle: Stop Daemon",
+        "category": "Gradle Kotlin"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "gradleKotlin.refresh",
+          "when": "view == gradleKotlin.modulesView",
+          "group": "navigation"
+        },
+        {
+          "command": "gradleKotlin.reloadProject",
+          "when": "view == gradleKotlin.modulesView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "gradleKotlin.runTask",
+          "when": "view == gradleKotlin.modulesView && viewItem == gradleTask",
+          "group": "inline"
+        },
+        {
+          "command": "gradleKotlin.openModule",
+          "when": "view == gradleKotlin.modulesView && viewItem == gradleModule",
+          "group": "inline"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "gradleKotlin.reloadProject",
+          "when": "resourceFilename =~ /^(build|settings)\\.gradle(\\.kts)?$|^libs\\.versions\\.toml$/",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "views": {
+      "gradleKotlin": [
+        {
+          "id": "gradleKotlin.modulesView",
+          "name": "Gradle Modules",
+          "icon": "images/icons/gradle.svg",
+          "contextualTitle": "Gradle"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gradleKotlin",
+          "title": "Gradle",
+          "icon": "images/icons/gradle.svg"
+        }
+      ]
+    },
+    "languageModelTools": [
+      {
+        "name": "gradle_run",
+        "displayName": "Run Gradle Task",
+        "modelDescription": "Invoke a Gradle task in the user's workspace through a long-lived Gradle daemon. Use this instead of spawning './gradlew' through a terminal — it reuses the same daemon across calls and avoids spawning competing JVMs. Supports passing the project path (e.g. ':app'), task name (e.g. 'test', 'build', 'dependencies'), and optional extra arguments. Returns the combined stdout/stderr and the exit code.",
+        "userDescription": "Lets Copilot run Gradle tasks via the shared daemon.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "gradle",
+        "icon": "$(symbol-method)",
+        "tags": ["gradle", "kotlin", "build"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "The Gradle task name to run, e.g. 'build', 'test', 'tasks', 'dependencies'. May include the project path prefix, e.g. ':app:test'."
+            },
+            "projectPath": {
+              "type": "string",
+              "description": "Optional Gradle project path (e.g. ':app' or ':modules:core'). Ignored if 'task' already starts with ':'."
+            },
+            "args": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Optional extra Gradle arguments (e.g. ['--info', '--rerun-tasks'])."
+            }
+          },
+          "required": ["task"]
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "icon": "node scripts/generate_icon.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.95.0",
+    "sharp": "^0.34.5",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/r0kuko/vscode-gradle-kotlin"
+  },
+  "extensionDependencies": [],
+  "extensionPack": []
+}

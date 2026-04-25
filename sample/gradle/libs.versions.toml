@@ -1,0 +1,22 @@
+[versions]
+kotlin = "2.0.21"
+coroutines = "1.9.0"
+junit = "5.11.3"
+ktor = "3.0.1"
+guava = "33.3.1-jre"
+
+[libraries]
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
+junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junit" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version = "1.11.3" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+
+[bundles]
+ktor-client = ["ktor-client-core", "ktor-client-cio"]
+testing = ["junit-jupiter", "kotlinx-coroutines-test"]
