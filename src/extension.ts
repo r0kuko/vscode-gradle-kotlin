@@ -18,6 +18,7 @@ import { LibsHoverProvider } from './hover';
 import { SettingsCodeActionProvider, addSubprojectCommand } from './codeActions';
 import { disposeDaemon, getDaemon, setDefaultInitScriptPath } from './daemon';
 import { createDaemonStatusItem } from './statusBar';
+import { createTestController } from './testController';
 import { registerGradleRunTool } from './aiTool';
 import { RecentRun, pushRecent } from './history';
 
@@ -44,6 +45,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const daemon = getDaemon(output);
     context.subscriptions.push({ dispose: () => disposeDaemon() });
     context.subscriptions.push(createDaemonStatusItem(daemon));
+
+    const testController = createTestController(context, daemon, () => {
+        const out: GradleModule[] = [];
+        for (const ws of workspaces.values()) out.push(...ws.modules);
+        return out;
+    });
 
     const modulesProvider = new GradleModulesProvider(context.extensionPath);
     modulesProvider.setTaskResolver(module => mergedTasks(module));
@@ -129,10 +136,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('gradleKotlin.rerunRecent', async (run: RecentRun) => {
             if (!run) return;
             output.show(true);
-            const result = await daemon.run({
-                workspaceRoot: run.workspaceRoot,
-                args: [run.task, ...run.args],
-            });
+            const result = await runWithProgress(
+                daemon,
+                `Gradle: ${run.task}`,
+                { workspaceRoot: run.workspaceRoot, args: [run.task, ...run.args] }
+            );
             await recordRun({
                 ...run,
                 timestamp: Date.now(),
@@ -172,13 +180,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         '**/libs.versions.toml'
     );
     context.subscriptions.push(watcher, catalogWatcher);
-    const fire = () => refreshAll(modulesProvider, codeLensProvider, inlayProvider);
+    const fire = async () => {
+        await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
+        refreshTestController(testController);
+    };
     watcher.onDidChange(fire);
     watcher.onDidCreate(fire);
     watcher.onDidDelete(fire);
     catalogWatcher.onDidChange(fire);
     catalogWatcher.onDidCreate(fire);
     catalogWatcher.onDidDelete(fire);
+
+    const testWatcher = vscode.workspace.createFileSystemWatcher('**/src/test/**/*.kt');
+    context.subscriptions.push(testWatcher);
+    const refreshTests = () => refreshTestController(testController);
+    testWatcher.onDidChange(refreshTests);
+    testWatcher.onDidCreate(refreshTests);
+    testWatcher.onDidDelete(refreshTests);
 
     context.subscriptions.push(
         vscode.workspace.onDidChangeWorkspaceFolders(fire),
@@ -199,6 +217,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
     await hydrateAllTasks(daemon, modulesProvider);
+    refreshTestController(testController);
 }
 
 export function deactivate(): void {
@@ -240,6 +259,11 @@ async function refreshAll(
     }
     codeLensProvider.refresh();
     inlayProvider.refresh();
+}
+
+/** Re-discover Kotlin tests under each module so the Test Explorer stays in sync. */
+function refreshTestController(controller: vscode.TestController | undefined): void {
+    controller?.resolveHandler?.(undefined);
 }
 
 function moduleKey(module: GradleModule): string {
@@ -291,7 +315,31 @@ async function reloadProject(daemon: ReturnType<typeof getDaemon>): Promise<void
     }
     output.show(true);
     output.appendLine(`\n=== Reloading Gradle project at ${folder.uri.fsPath} ===`);
-    await daemon.run({ workspaceRoot: folder.uri.fsPath, args: ['help', '--quiet'] });
+    await runWithProgress(
+        daemon,
+        'Gradle: Reload Project',
+        { workspaceRoot: folder.uri.fsPath, args: ['help', '--quiet'] }
+    );
+}
+
+/**
+ * Run a Gradle invocation through the shared daemon while showing a
+ * cancellable notification. Cancelling the notification SIGTERMs the child.
+ */
+function runWithProgress(
+    daemon: ReturnType<typeof getDaemon>,
+    title: string,
+    request: { workspaceRoot: string; args: string[] }
+): Thenable<import('./daemon').DaemonRunResult> {
+    return vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title,
+            cancellable: true,
+        },
+        (_progress, token) =>
+            daemon.run({ ...request, token })
+    );
 }
 
 async function runTaskCommand(
@@ -331,10 +379,11 @@ async function runTaskCommand(
     }
 
     output.show(true);
-    const result = await daemon.run({
-        workspaceRoot: folder.uri.fsPath,
-        args: [qualified, ...extraArgs],
-    });
+    const result = await runWithProgress(
+        daemon,
+        `Gradle: ${qualified}`,
+        { workspaceRoot: folder.uri.fsPath, args: [qualified, ...extraArgs] }
+    );
     await recordRun({
         task: qualified,
         args: extraArgs,
@@ -389,7 +438,11 @@ async function runTestsForTask(
     const qualified = qualifyTask(task.projectPath, task.name);
     const args = [qualified, '--tests', pattern.trim()];
     output.show(true);
-    const result = await daemon.run({ workspaceRoot: folder.uri.fsPath, args });
+    const result = await runWithProgress(
+        daemon,
+        `Gradle: ${qualified} --tests ${pattern.trim()}`,
+        { workspaceRoot: folder.uri.fsPath, args }
+    );
     await recordRun({
         task: qualified,
         args: ['--tests', pattern.trim()],
@@ -414,7 +467,11 @@ async function runDependencies(
     const module = owning ?? ws.modules[0];
     const qualified = qualifyTask(module.projectPath, 'dependencies');
     output.show(true);
-    await daemon.run({ workspaceRoot: folder.uri.fsPath, args: [qualified] });
+    await runWithProgress(
+        daemon,
+        `Gradle: ${qualified}`,
+        { workspaceRoot: folder.uri.fsPath, args: [qualified] }
+    );
 }
 
 /** Re-export discovered module tasks for completion / quickpick reuse. */

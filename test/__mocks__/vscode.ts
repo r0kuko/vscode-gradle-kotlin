@@ -209,6 +209,58 @@ export enum StatusBarAlignment {
     Right = 2,
 }
 
+export enum ProgressLocation {
+    Notification = 15,
+    Window = 10,
+}
+
+export enum TestRunProfileKind {
+    Run = 1,
+    Debug = 2,
+    Coverage = 3,
+}
+
+export class TestMessage {
+    constructor(public readonly message: string) {}
+}
+
+export const tests = {
+    createTestController: (_id: string, _label: string) => ({
+        items: {
+            replace: (_items: unknown[]) => {},
+            add: (_item: unknown) => {},
+            forEach: (_cb: (i: unknown) => void) => {},
+            get size() {
+                return 0;
+            },
+        },
+        createTestItem: (id: string, label: string, _uri?: Uri) => ({
+            id,
+            label,
+            children: {
+                add: (_i: unknown) => {},
+                forEach: (_cb: (i: unknown) => void) => {},
+                get size() {
+                    return 0;
+                },
+            },
+            range: undefined as Range | undefined,
+            canResolveChildren: false,
+        }),
+        createRunProfile: () => ({ dispose() {} }),
+        createTestRun: () => ({
+            enqueued: () => {},
+            started: () => {},
+            passed: () => {},
+            failed: () => {},
+            skipped: () => {},
+            end: () => {},
+        }),
+        resolveHandler: undefined as undefined | ((item: unknown) => void),
+        dispose() {},
+    }),
+};
+
 export const commands = {
     registerCommand: () => ({ dispose() {} }),
 };
@@ -265,4 +317,8 @@ export default {
     LanguageModelTextPart,
     extensions,
     StatusBarAlignment,
+    ProgressLocation,
+    TestRunProfileKind,
+    TestMessage,
+    tests,
 };
