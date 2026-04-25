@@ -1,5 +1,6 @@
 node_modules/
 out/
+out-e2e/
 *.vsix
 .vscode-test/
 scripts/.cache/

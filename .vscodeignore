@@ -2,12 +2,15 @@
 .vscode-test/**
 src/**
 test/**
+test-e2e/**
+out-e2e/**
 sample/**
 scripts/**
 **/*.map
 **/*.ts
 tsconfig.json
 tsconfig.test.json
+tsconfig.e2e.json
 vitest.config.ts
 .gitignore
 .npmrc
