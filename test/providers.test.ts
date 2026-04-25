@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { GradleCodeLensProvider } from '../src/codelens';
 import { LibsCompletionProvider } from '../src/completion';
 import { parseCatalog } from '../src/libs';
+import { GradleModulesProvider } from '../src/treeProvider';
 import * as vscode from 'vscode';
 
 const SAMPLE_BUILD = [
@@ -80,5 +81,34 @@ describe('LibsCompletionProvider', () => {
         } as unknown as vscode.TextDocument;
         const items = provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
         expect(items).toEqual([]);
+    });
+});
+
+describe('GradleModulesProvider multi-root', () => {
+    it('clears stale roots on clear()', () => {
+        const provider = new GradleModulesProvider('/ext');
+        provider.setModules('/ws1', [
+            {
+                rootPath: '/ws1',
+                projectPath: ':',
+                name: 'ws1',
+                workspaceRoot: '/ws1',
+                buildScript: '/ws1/build.gradle.kts',
+                kotlinDsl: true,
+            },
+        ]);
+        provider.setModules('/ws2', [
+            {
+                rootPath: '/ws2',
+                projectPath: ':',
+                name: 'ws2',
+                workspaceRoot: '/ws2',
+                buildScript: '/ws2/build.gradle.kts',
+                kotlinDsl: true,
+            },
+        ]);
+        expect(provider.getChildren(undefined).length).toBe(2);
+        provider.clear();
+        expect(provider.getChildren(undefined).length).toBe(0);
     });
 });

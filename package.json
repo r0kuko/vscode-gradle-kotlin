@@ -120,6 +120,12 @@
         "icon": "$(symbol-package)"
       },
       {
+        "command": "gradleKotlin.addSubproject",
+        "title": "Gradle: Add Subproject…",
+        "category": "Gradle Kotlin",
+        "icon": "$(new-folder)"
+      },
+      {
         "command": "gradleKotlin.openModule",
         "title": "Gradle: Open Module Build File",
         "category": "Gradle Kotlin"

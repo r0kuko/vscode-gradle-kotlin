@@ -73,6 +73,15 @@ export class CompletionItem {
     constructor(public readonly label: string, public readonly kind?: number) {}
 }
 
+export class CodeAction {
+    command?: { command: string; title: string; arguments?: unknown[] };
+    constructor(public readonly title: string, public readonly kind?: unknown) {}
+}
+
+export const CodeActionKind = {
+    Refactor: 'refactor',
+};
+
 export enum CompletionItemKind {
     Constant = 1,
     Module = 2,
@@ -151,8 +160,23 @@ export const workspace = {
     onDidChangeWorkspaceFolders: () => ({ dispose() {} }),
     onDidChangeConfiguration: () => ({ dispose() {} }),
     getWorkspaceFolder: (_uri: Uri) => undefined,
-    openTextDocument: async (_uri: Uri) => ({}),
+    openTextDocument: async (_uri: Uri) => ({
+        getText: () => '',
+        lineCount: 1,
+        lineAt: (_line: number) => ({ text: '' }),
+        save: async () => true,
+    }),
+    applyEdit: async (_edit: unknown) => true,
+    fs: {
+        createDirectory: async (_uri: Uri) => {},
+        stat: async (_uri: Uri) => ({}),
+        writeFile: async (_uri: Uri, _bytes: Uint8Array) => {},
+    },
 };
+
+export class WorkspaceEdit {
+    replace(_uri: Uri, _range: Range, _text: string) {}
+}
 
 export const window = {
     activeTextEditor: undefined as unknown,
@@ -195,6 +219,7 @@ export const languages = {
     registerCompletionItemProvider: () => ({ dispose() {} }),
     registerDefinitionProvider: () => ({ dispose() {} }),
     registerHoverProvider: () => ({ dispose() {} }),
+    registerCodeActionsProvider: () => ({ dispose() {} }),
 };
 
 export const lm = {
@@ -220,6 +245,8 @@ export default {
     Hover,
     CodeLens,
     CompletionItem,
+    CodeAction,
+    CodeActionKind,
     CompletionItemKind,
     InlayHint,
     InlayHintKind,
@@ -228,6 +255,7 @@ export default {
     TreeItemCollapsibleState,
     EventEmitter,
     CancellationTokenSource,
+    WorkspaceEdit,
     workspace,
     window,
     commands,

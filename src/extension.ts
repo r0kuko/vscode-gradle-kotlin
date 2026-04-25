@@ -15,6 +15,7 @@ import { LibsInlayHintsProvider } from './inlayHints';
 import { LibsCompletionProvider } from './completion';
 import { LibsDefinitionProvider } from './definition';
 import { LibsHoverProvider } from './hover';
+import { SettingsCodeActionProvider, addSubprojectCommand } from './codeActions';
 import { disposeDaemon, getDaemon } from './daemon';
 import { createDaemonStatusItem } from './statusBar';
 import { registerGradleRunTool } from './aiTool';
@@ -54,6 +55,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const completionProvider = new LibsCompletionProvider(() => activeCatalog());
     const definitionProvider = new LibsDefinitionProvider(() => activeCatalog());
     const hoverProvider = new LibsHoverProvider(() => activeCatalog());
+    const settingsCodeActionProvider = new SettingsCodeActionProvider();
 
     context.subscriptions.push(
         vscode.languages.registerCodeLensProvider(
@@ -76,6 +78,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.languages.registerHoverProvider(
             { scheme: 'file', pattern: '**/*.gradle{,.kts}' },
             hoverProvider
+        ),
+        vscode.languages.registerCodeActionsProvider(
+            { scheme: 'file', pattern: '**/settings.gradle{,.kts}' },
+            settingsCodeActionProvider
         )
     );
 
@@ -137,6 +143,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.commands.registerCommand('gradleKotlin.runDependencies', async (uri?: vscode.Uri) => {
             await runDependencies(daemon, uri);
+        }),
+        vscode.commands.registerCommand('gradleKotlin.addSubproject', async (uri?: vscode.Uri) => {
+            await addSubprojectCommand(uri);
+            await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
+            await hydrateAllTasks(daemon, modulesProvider);
         }),
         vscode.commands.registerCommand('gradleKotlin.openModule', async (target: ModuleTreeItemData) => {
             if (target?.module?.buildScript) {
@@ -213,6 +224,7 @@ async function refreshAll(
 ): Promise<void> {
     workspaces.clear();
     dynamicTasksByModule.clear();
+    treeProvider.clear();
     const folders = vscode.workspace.workspaceFolders ?? [];
     for (const folder of folders) {
         const root = folder.uri.fsPath;

@@ -68,6 +68,12 @@ export class GradleModulesProvider
         this._onDidChangeTreeData.fire(undefined);
     }
 
+    clear(): void {
+        this.modulesByWorkspace.clear();
+        this.recentByWorkspace.clear();
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
     setTaskResolver(resolver: (module: GradleModule) => GradleTask[]): void {
         this.taskResolver = resolver;
         this._onDidChangeTreeData.fire(undefined);
