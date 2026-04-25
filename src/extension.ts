@@ -23,6 +23,7 @@ import { createTestController } from './testController';
 import { registerGradleRunTool } from './aiTool';
 import { RecentRun, pushRecent } from './history';
 import { splitArgs } from './argSplit';
+import { parseGradleDiagnostics } from './buildDiagnostics';
 
 const HISTORY_KEY = 'gradleKotlin.recentRuns';
 
@@ -47,6 +48,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const daemon = getDaemon(output);
     context.subscriptions.push({ dispose: () => disposeDaemon() });
     context.subscriptions.push(createDaemonStatusItem(daemon));
+
+    const buildDiagnostics = vscode.languages.createDiagnosticCollection('gradleKotlin');
+    context.subscriptions.push(buildDiagnostics);
+    context.subscriptions.push(
+        daemon.onEvent(event => {
+            if (event.kind !== 'finish' || !event.result) return;
+            updateBuildDiagnostics(buildDiagnostics, event.workspaceRoot, event.result.combined);
+        })
+    );
 
     const testController = createTestController(context, daemon, () => {
         const out: GradleModule[] = [];
@@ -389,6 +399,45 @@ function workspaceRootForTarget(
         return target.module.workspaceRoot;
     }
     return undefined;
+}
+
+/**
+ * Convert parsed Gradle diagnostics into VS Code diagnostics, scoped to
+ * files that live under `workspaceRoot`.  We rebuild the collection on
+ * every finish — Gradle prints all current errors each time so a stale
+ * one disappears as soon as the build is green again.
+ */
+function updateBuildDiagnostics(
+    collection: vscode.DiagnosticCollection,
+    workspaceRoot: string,
+    combined: string
+): void {
+    const parsed = parseGradleDiagnostics(combined);
+    const byFile = new Map<string, vscode.Diagnostic[]>();
+    for (const d of parsed) {
+        if (!d.file.startsWith(workspaceRoot)) continue;
+        const range = new vscode.Range(d.line, d.column, d.line, d.column + 1);
+        const diag = new vscode.Diagnostic(
+            range,
+            d.message,
+            d.severity === 'error'
+                ? vscode.DiagnosticSeverity.Error
+                : vscode.DiagnosticSeverity.Warning
+        );
+        diag.source = 'gradle';
+        const list = byFile.get(d.file) ?? [];
+        list.push(diag);
+        byFile.set(d.file, list);
+    }
+    // Clear old diagnostics for this workspace before publishing fresh ones.
+    const stale: vscode.Uri[] = [];
+    collection.forEach(uri => {
+        if (uri.fsPath.startsWith(workspaceRoot)) stale.push(uri);
+    });
+    for (const uri of stale) collection.delete(uri);
+    for (const [file, diags] of byFile) {
+        collection.set(vscode.Uri.file(file), diags);
+    }
 }
 
 /**
