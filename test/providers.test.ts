@@ -82,6 +82,33 @@ describe('LibsCompletionProvider', () => {
         const items = provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
         expect(items).toEqual([]);
     });
+
+    it('completes plugin ids inside id("…")', () => {
+        const provider = new LibsCompletionProvider(() => catalog);
+        const text = 'plugins { id("org.jetbrains';
+        const doc = {
+            uri: vscode.Uri.file('/ws/build.gradle.kts'),
+            getText: () => text,
+            lineAt: (_l: number) => ({ text }),
+        } as unknown as vscode.TextDocument;
+        const items = provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
+        const labels = items.map(i => i.label);
+        expect(labels).toContain('org.jetbrains.kotlin.jvm');
+    });
+
+    it('completes kotlin("jvm") with the short id only', () => {
+        const provider = new LibsCompletionProvider(() => catalog);
+        const text = 'plugins { kotlin("';
+        const doc = {
+            uri: vscode.Uri.file('/ws/build.gradle.kts'),
+            getText: () => text,
+            lineAt: (_l: number) => ({ text }),
+        } as unknown as vscode.TextDocument;
+        const items = provider.provideCompletionItems(doc, new vscode.Position(0, text.length));
+        const labels = items.map(i => i.label);
+        expect(labels).toContain('jvm');
+        expect(labels).not.toContain('org.jetbrains.kotlin.jvm');
+    });
 });
 
 describe('GradleModulesProvider multi-root', () => {

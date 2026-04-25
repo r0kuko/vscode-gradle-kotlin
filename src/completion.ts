@@ -22,6 +22,12 @@ export class LibsCompletionProvider implements vscode.CompletionItemProvider {
         if (!catalog) return [];
 
         const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
+
+        const pluginCallMatch = /\b(id|kotlin)\s*\(\s*["']([A-Za-z0-9_.-]*)$/.exec(linePrefix);
+        if (pluginCallMatch) {
+            return this.pluginIdCompletions(catalog, pluginCallMatch[1] as 'id' | 'kotlin');
+        }
+
         const prefixMatch = linePrefix.match(/(?:^|[^A-Za-z_])libs\.([A-Za-z0-9_.-]*)$/);
         if (!prefixMatch) return [];
 
@@ -63,6 +69,34 @@ export class LibsCompletionProvider implements vscode.CompletionItemProvider {
             items.push(item);
         }
 
+        return items;
+    }
+
+    /**
+     * Suggest plugin coordinates from the catalog when the user is typing
+     * inside `id("…")` or `kotlin("…")` in a build script.  For
+     * `kotlin("…")` we strip the `org.jetbrains.kotlin.` prefix so users
+     * get the JetBrains-style short ids.
+     */
+    private pluginIdCompletions(
+        catalog: VersionCatalog,
+        flavor: 'id' | 'kotlin'
+    ): vscode.CompletionItem[] {
+        const items: vscode.CompletionItem[] = [];
+        const seen = new Set<string>();
+        for (const pl of catalog.plugins.values()) {
+            let id = pl.id;
+            if (flavor === 'kotlin') {
+                if (!id.startsWith('org.jetbrains.kotlin.')) continue;
+                id = id.slice('org.jetbrains.kotlin.'.length);
+            }
+            if (seen.has(id)) continue;
+            seen.add(id);
+            const item = new vscode.CompletionItem(id, vscode.CompletionItemKind.Module);
+            item.insertText = id;
+            item.detail = `${pl.id}${pl.version ? ':' + pl.version : ''}`;
+            items.push(item);
+        }
         return items;
     }
 }
