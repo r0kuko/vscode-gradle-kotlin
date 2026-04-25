@@ -67,6 +67,19 @@
           "type": "string",
           "default": "",
           "description": "Optional absolute path of an init.gradle(.kts) script to inject. When empty, the bundled extension init script is used."
+        },
+        "gradleKotlin.aliases": {
+          "type": "object",
+          "default": {},
+          "description": "Named shortcuts for `Gradle: Run Alias…`. Example: `{ \"ci\": { \"task\": \"build\", \"args\": [\"--info\"] } }`.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "task": { "type": "string" },
+              "args": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["task"]
+          }
         }
       }
     },
@@ -153,6 +166,47 @@
       {
         "command": "gradleKotlin.stopDaemon",
         "title": "Gradle: Stop Daemon",
+        "category": "Gradle Kotlin"
+      },
+      {
+        "command": "gradleKotlin.pinTask",
+        "title": "Gradle: Pin Task",
+        "category": "Gradle Kotlin",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "gradleKotlin.runPinned",
+        "title": "Gradle: Run Pinned Task…",
+        "category": "Gradle Kotlin"
+      },
+      {
+        "command": "gradleKotlin.runAlias",
+        "title": "Gradle: Run Alias…",
+        "category": "Gradle Kotlin"
+      },
+      {
+        "command": "gradleKotlin.runMany",
+        "title": "Gradle: Run Multiple Tasks…",
+        "category": "Gradle Kotlin"
+      },
+      {
+        "command": "gradleKotlin.runTaskContinuous",
+        "title": "Gradle: Run Task Continuously (--continuous)",
+        "category": "Gradle Kotlin"
+      },
+      {
+        "command": "gradleKotlin.toggleWrapperDistribution",
+        "title": "Gradle: Toggle Wrapper Distribution (bin ↔ all)",
+        "category": "Gradle Kotlin"
+      },
+      {
+        "command": "gradleKotlin.cycleDependencyConfiguration",
+        "title": "Gradle: Cycle Dependency Configuration",
+        "category": "Gradle Kotlin"
+      },
+      {
+        "command": "gradleKotlin.moveLiteralToCatalog",
+        "title": "Gradle: Move Literal Dependency to Version Catalog",
         "category": "Gradle Kotlin"
       }
     ],

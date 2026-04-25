@@ -41,6 +41,9 @@ import {
     parseWrapperProperties,
     rewriteDistributionUrl,
 } from './wrapper';
+import { extractBuildScanUrls } from './buildScan';
+
+const PINNED_KEY = 'gradleKotlin.pinnedTasks';
 
 const HISTORY_KEY = 'gradleKotlin.recentRuns';
 
@@ -264,6 +267,98 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('gradleKotlin.stopDaemon', async () => {
             const folder = pickWorkspaceFolder();
             if (folder) await daemon.stopAll(folder.uri.fsPath);
+        }),
+        vscode.commands.registerCommand('gradleKotlin.pinTask', async (target: ModuleTreeItemData | GradleTask | undefined) => {
+            const qualified = qualifiedFromTarget(target);
+            if (!qualified) return;
+            const list = context.workspaceState.get<string[]>(PINNED_KEY, []) ?? [];
+            if (!list.includes(qualified)) {
+                await context.workspaceState.update(PINNED_KEY, [qualified, ...list]);
+                vscode.window.setStatusBarMessage(`Pinned ${qualified}`, 3000);
+            }
+        }),
+        vscode.commands.registerCommand('gradleKotlin.unpinTask', async (qualified?: string) => {
+            const list = context.workspaceState.get<string[]>(PINNED_KEY, []) ?? [];
+            const next = list.filter(t => t !== qualified);
+            await context.workspaceState.update(PINNED_KEY, next);
+        }),
+        vscode.commands.registerCommand('gradleKotlin.runPinned', async () => {
+            const list = context.workspaceState.get<string[]>(PINNED_KEY, []) ?? [];
+            if (list.length === 0) {
+                vscode.window.showInformationMessage('No pinned Gradle tasks yet. Right-click a task in the tree to pin it.');
+                return;
+            }
+            const pick = await vscode.window.showQuickPick(list, { placeHolder: 'Run pinned task' });
+            if (!pick) return;
+            const folder = await pickWorkspaceFolderInteractive(undefined);
+            if (!folder) return;
+            const result = await runWithProgress(daemon, `Gradle: ${pick}`, {
+                workspaceRoot: folder.uri.fsPath,
+                args: [pick],
+            });
+            await recordRun({ task: pick, args: [], workspaceRoot: folder.uri.fsPath, timestamp: Date.now(), exitCode: result.exitCode, durationMs: result.durationMs });
+        }),
+        vscode.commands.registerCommand('gradleKotlin.runAlias', async () => {
+            const aliases = vscode.workspace.getConfiguration('gradleKotlin').get<Record<string, { task: string; args?: string[] }>>('aliases') ?? {};
+            const names = Object.keys(aliases);
+            if (names.length === 0) {
+                vscode.window.showInformationMessage(
+                    'Define `gradleKotlin.aliases` in settings, e.g. { "ci": { "task": "build", "args": ["--info"] } }.'
+                );
+                return;
+            }
+            const pick = await vscode.window.showQuickPick(names, { placeHolder: 'Run Gradle alias' });
+            if (!pick) return;
+            const alias = aliases[pick];
+            const folder = await pickWorkspaceFolderInteractive(undefined);
+            if (!folder) return;
+            const result = await runWithProgress(daemon, `Gradle: ${pick} (${alias.task})`, {
+                workspaceRoot: folder.uri.fsPath,
+                args: [alias.task, ...(alias.args ?? [])],
+            });
+            await recordRun({ task: alias.task, args: alias.args ?? [], workspaceRoot: folder.uri.fsPath, timestamp: Date.now(), exitCode: result.exitCode, durationMs: result.durationMs });
+        }),
+        vscode.commands.registerCommand('gradleKotlin.runMany', async () => {
+            const folder = await pickWorkspaceFolderInteractive(undefined);
+            if (!folder) return;
+            const allTasks: { label: string; description?: string }[] = [];
+            for (const ws of workspaces.values()) {
+                if (ws.folder.uri.fsPath !== folder.uri.fsPath) continue;
+                for (const m of ws.modules) {
+                    for (const t of mergedTasks(m)) {
+                        allTasks.push({ label: qualifyTask(m.projectPath, t.name), description: t.group ?? '' });
+                    }
+                }
+            }
+            const picks = await vscode.window.showQuickPick(allTasks, { canPickMany: true, placeHolder: 'Pick one or more tasks to run sequentially' });
+            if (!picks || picks.length === 0) return;
+            const args = picks.map(p => p.label);
+            const result = await runWithProgress(daemon, `Gradle: ${args.join(' ')}`, {
+                workspaceRoot: folder.uri.fsPath,
+                args,
+            });
+            await recordRun({ task: args.join(' '), args: [], workspaceRoot: folder.uri.fsPath, timestamp: Date.now(), exitCode: result.exitCode, durationMs: result.durationMs });
+        }),
+        vscode.commands.registerCommand('gradleKotlin.runTaskContinuous', async (target: ModuleTreeItemData | GradleTask | undefined) => {
+            const folder = await pickWorkspaceFolderInteractive(target);
+            if (!folder) return;
+            const qualified = qualifiedFromTarget(target);
+            if (!qualified) return;
+            await runWithProgress(daemon, `Gradle: ${qualified} (continuous)`, {
+                workspaceRoot: folder.uri.fsPath,
+                args: [qualified, '-t'],
+            });
+        }),
+        vscode.commands.registerCommand('gradleKotlin.toggleWrapperDistribution', async (uri?: vscode.Uri) => {
+            const target = uri ?? vscode.window.activeTextEditor?.document.uri;
+            if (!target) return;
+            const text = (await vscode.workspace.fs.readFile(target)).toString();
+            const parsed = parseWrapperProperties(text);
+            if (!parsed) return;
+            const flipped = parsed.flavor === 'all' ? 'bin' : 'all';
+            const newText = rewriteDistributionUrl(text, distributionUrlFor(parsed.version, flipped));
+            await vscode.workspace.fs.writeFile(target, Buffer.from(newText, 'utf8'));
+            vscode.window.setStatusBarMessage(`Wrapper distribution → ${flipped}`, 3000);
         })
     );
 
@@ -537,8 +632,7 @@ async function pickWorkspaceFolderInteractive(
 /** Synchronous fallback used when no target context is available. */
 function pickWorkspaceFolder(): vscode.WorkspaceFolder | undefined {
     const folders = vscode.workspace.workspaceFolders ?? [];
-    if (folders.length === 0) return undefined;
-    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    if (folders.length === 0) return undefined;    const activeUri = vscode.window.activeTextEditor?.document.uri;
     if (activeUri) {
         const match = vscode.workspace.getWorkspaceFolder(activeUri);
         if (match) return match;
@@ -555,6 +649,18 @@ function workspaceRootForTarget(
     }
     if ('module' in target && target.module?.workspaceRoot) {
         return target.module.workspaceRoot;
+    }
+    return undefined;
+}
+
+function qualifiedFromTarget(target?: ModuleTreeItemData | GradleTask): string | undefined {
+    if (!target) return undefined;
+    if ('kind' in target && target.kind === 'task' && target.task) {
+        return qualifyTask(target.task.projectPath, target.task.name);
+    }
+    if ('name' in target && (target as GradleTask).name) {
+        const t = target as GradleTask;
+        return qualifyTask(t.projectPath, t.name);
     }
     return undefined;
 }
@@ -613,9 +719,9 @@ function runWithProgress(
             title,
             cancellable: true,
         },
-        (progress, token) => {
+        async (progress, token) => {
             let buf = '';
-            return daemon.run({
+            const result = await daemon.run({
                 ...request,
                 token,
                 onOutput: chunk => {
@@ -632,6 +738,17 @@ function runWithProgress(
                     }
                 },
             });
+            const scanUrls = extractBuildScanUrls(result.combined);
+            if (scanUrls.length > 0) {
+                vscode.window
+                    .showInformationMessage(`Gradle Build Scan published: ${scanUrls[0]}`, 'Open')
+                    .then(choice => {
+                        if (choice === 'Open') {
+                            vscode.env.openExternal(vscode.Uri.parse(scanUrls[0]));
+                        }
+                    });
+            }
+            return result;
         }
     );
 }
