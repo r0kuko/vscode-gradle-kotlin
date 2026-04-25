@@ -69,14 +69,7 @@ export class GradleRunTool implements vscode.LanguageModelTool<GradleRunToolInpu
 
         const result = await this.daemon.run({ workspaceRoot, args, token });
 
-        const summary =
-            `Gradle exit code: ${result.exitCode ?? 'unknown'} (in ${result.durationMs} ms)\n\n` +
-            '```\n' +
-            tail(result.combined, 16_000) +
-            '\n```';
-        return new vscode.LanguageModelToolResult([
-            new vscode.LanguageModelTextPart(summary),
-        ]);
+        return toolResult(buildRunPayload(fullTask, result));
     }
 
     private fullyQualifyTask(input: GradleRunToolInput): string {
@@ -164,14 +157,7 @@ export class GradleDependenciesTool
         const projectPath = options.input.projectPath ?? ':';
         const args = [qualifyTask(projectPath, 'dependencies'), ...(options.input.args ?? [])];
         const result = await this.daemon.run({ workspaceRoot, args, token });
-        const summary =
-            `Gradle exit code: ${result.exitCode ?? 'unknown'} (in ${result.durationMs} ms)\n\n` +
-            '```\n' +
-            tail(result.combined, 16_000) +
-            '\n```';
-        return new vscode.LanguageModelToolResult([
-            new vscode.LanguageModelTextPart(summary),
-        ]);
+        return toolResult(buildRunPayload(args.join(' '), result));
     }
 }
 
@@ -240,9 +226,41 @@ function formatArgs(args: string[] | undefined): string {
     return ' ' + args.join(' ');
 }
 
-function tail(s: string, max: number): string {
-    if (s.length <= max) return s;
-    return '…\n' + s.slice(s.length - max);
+const MAX_TAIL_BYTES = 16_000;
+
+/**
+ * Build a structured payload for Copilot tools. Always returns the last
+ * MAX_TAIL_BYTES of combined output so the model knows when output was
+ * truncated and can ask follow-ups.
+ */
+export function buildRunPayload(
+    invocation: string,
+    result: { exitCode: number | null; durationMs: number; combined: string }
+): {
+    invocation: string;
+    exitCode: number | null;
+    durationMs: number;
+    truncated: boolean;
+    bytes: number;
+    tail: string;
+} {
+    const truncated = result.combined.length > MAX_TAIL_BYTES;
+    return {
+        invocation,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        truncated,
+        bytes: result.combined.length,
+        tail: truncated ? result.combined.slice(-MAX_TAIL_BYTES) : result.combined,
+    };
+}
+
+function toolResult(payload: unknown): vscode.LanguageModelToolResult {
+    return new vscode.LanguageModelToolResult([
+        new vscode.LanguageModelTextPart(
+            '```json\n' + JSON.stringify(payload, null, 2) + '\n```'
+        ),
+    ]);
 }
 
 /**
