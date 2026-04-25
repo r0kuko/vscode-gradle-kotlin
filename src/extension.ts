@@ -167,7 +167,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
         }),
         vscode.commands.registerCommand('gradleKotlin.stopDaemon', async () => {
-            const folder = vscode.workspace.workspaceFolders?.[0];
+            const folder = pickWorkspaceFolder();
             if (folder) await daemon.stopAll(folder.uri.fsPath);
         })
     );
@@ -288,27 +288,31 @@ async function hydrateAllTasks(
     daemon: ReturnType<typeof getDaemon>,
     treeProvider: GradleModulesProvider
 ): Promise<void> {
-    for (const ws of workspaces.values()) {
-        for (const module of ws.modules) {
-            try {
-                const result = await daemon.run({
-                    workspaceRoot: ws.folder.uri.fsPath,
-                    args: [qualifyTask(module.projectPath, 'tasks'), '--all', '--quiet'],
-                });
-                const parsed = parseTasksAllOutput(result.combined, module.projectPath);
-                if (parsed.length > 0) {
-                    dynamicTasksByModule.set(moduleKey(module), parsed);
+    // Run each workspace in parallel; modules within a workspace stay
+    // serialized because the daemon already serializes per workspaceRoot.
+    await Promise.all(
+        Array.from(workspaces.values()).map(async ws => {
+            for (const module of ws.modules) {
+                try {
+                    const result = await daemon.run({
+                        workspaceRoot: ws.folder.uri.fsPath,
+                        args: [qualifyTask(module.projectPath, 'tasks'), '--all', '--quiet'],
+                    });
+                    const parsed = parseTasksAllOutput(result.combined, module.projectPath);
+                    if (parsed.length > 0) {
+                        dynamicTasksByModule.set(moduleKey(module), parsed);
+                    }
+                } catch {
+                    // Best-effort only: static tasks remain available.
                 }
-            } catch {
-                // Best-effort only: static tasks remain available.
             }
-        }
-        treeProvider.refresh();
-    }
+            treeProvider.refresh();
+        })
+    );
 }
 
 async function reloadProject(daemon: ReturnType<typeof getDaemon>): Promise<void> {
-    const folder = vscode.workspace.workspaceFolders?.[0];
+    const folder = pickWorkspaceFolder();
     if (!folder) {
         vscode.window.showInformationMessage('No Gradle workspace detected.');
         return;
@@ -320,6 +324,65 @@ async function reloadProject(daemon: ReturnType<typeof getDaemon>): Promise<void
         'Gradle: Reload Project',
         { workspaceRoot: folder.uri.fsPath, args: ['help', '--quiet'] }
     );
+}
+
+/**
+ * Pick the most relevant workspace folder for a command:
+ *  1. The folder owning the explicit `target` (tree node / task), when given.
+ *  2. The folder owning the active editor.
+ *  3. If we only have one workspace, use it.
+ *  4. Otherwise prompt with a quick pick.
+ */
+async function pickWorkspaceFolderInteractive(
+    target?: ModuleTreeItemData | GradleTask
+): Promise<vscode.WorkspaceFolder | undefined> {
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    if (folders.length === 0) return undefined;
+
+    const fromTarget = workspaceRootForTarget(target);
+    if (fromTarget) {
+        const match = folders.find(f => f.uri.fsPath === fromTarget);
+        if (match) return match;
+    }
+
+    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    if (activeUri) {
+        const match = vscode.workspace.getWorkspaceFolder(activeUri);
+        if (match) return match;
+    }
+
+    if (folders.length === 1) return folders[0];
+
+    const pick = await vscode.window.showQuickPick(
+        folders.map(f => ({ label: f.name, description: f.uri.fsPath, folder: f })),
+        { placeHolder: 'Select the Gradle workspace to run against' }
+    );
+    return (pick as { folder: vscode.WorkspaceFolder } | undefined)?.folder;
+}
+
+/** Synchronous fallback used when no target context is available. */
+function pickWorkspaceFolder(): vscode.WorkspaceFolder | undefined {
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    if (folders.length === 0) return undefined;
+    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    if (activeUri) {
+        const match = vscode.workspace.getWorkspaceFolder(activeUri);
+        if (match) return match;
+    }
+    return folders[0];
+}
+
+function workspaceRootForTarget(
+    target?: ModuleTreeItemData | GradleTask
+): string | undefined {
+    if (!target) return undefined;
+    if ('workspaceRoot' in target && typeof target.workspaceRoot === 'string') {
+        return target.workspaceRoot;
+    }
+    if ('module' in target && target.module?.workspaceRoot) {
+        return target.module.workspaceRoot;
+    }
+    return undefined;
 }
 
 /**
@@ -348,7 +411,7 @@ async function runTaskCommand(
     recordRun: (r: RecentRun) => Promise<void>,
     options: { promptForArgs?: boolean } = {}
 ): Promise<void> {
-    const folder = vscode.workspace.workspaceFolders?.[0];
+    const folder = await pickWorkspaceFolderInteractive(target);
     if (!folder) return;
 
     let qualified: string | undefined;
@@ -411,7 +474,7 @@ async function runTestsForTask(
     target: ModuleTreeItemData | GradleTask | undefined,
     recordRun: (r: RecentRun) => Promise<void>
 ): Promise<void> {
-    const folder = vscode.workspace.workspaceFolders?.[0];
+    const folder = await pickWorkspaceFolderInteractive(target);
     if (!folder) return;
 
     let task: GradleTask | undefined;
