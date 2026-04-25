@@ -43,6 +43,11 @@
           "default": true,
           "description": "Show inline ghost-text version hints next to libs.x.y references."
         },
+        "gradleKotlin.versionInlayHints.checkLatest": {
+          "type": "boolean",
+          "default": true,
+          "description": "When enabled, query Maven metadata and show latest available version as current -> latest."
+        },
         "gradleKotlin.codeLens.enabled": {
           "type": "boolean",
           "default": true,
@@ -52,6 +57,16 @@
           "type": "boolean",
           "default": true,
           "description": "Keep a long-lived Gradle daemon (via --daemon) and expose it to Copilot through the language-model tool 'gradle_run'."
+        },
+        "gradleKotlin.initScript.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Inject a lightweight init script into daemon invocations using -I."
+        },
+        "gradleKotlin.initScriptPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path of an init.gradle(.kts) script to inject. When empty, the bundled extension init script is used."
         }
       }
     },
@@ -236,6 +251,63 @@
             }
           },
           "required": ["task"]
+        }
+      },
+      {
+        "name": "gradle_tasks",
+        "displayName": "List Gradle Tasks",
+        "modelDescription": "List available Gradle tasks for a project path via the shared daemon.",
+        "userDescription": "Lists Gradle tasks through the shared daemon.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "gradleTasks",
+        "icon": "$(list-tree)",
+        "tags": ["gradle", "tasks"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "projectPath": {
+              "type": "string",
+              "description": "Optional Gradle project path (e.g. ':app'). Defaults to ':'."
+            }
+          }
+        }
+      },
+      {
+        "name": "gradle_dependencies",
+        "displayName": "Run Gradle Dependencies",
+        "modelDescription": "Run the Gradle dependencies task for a project path via the shared daemon.",
+        "userDescription": "Runs dependencies through the shared daemon.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "gradleDependencies",
+        "icon": "$(symbol-package)",
+        "tags": ["gradle", "dependencies"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "projectPath": {
+              "type": "string",
+              "description": "Optional Gradle project path (e.g. ':app'). Defaults to ':'."
+            },
+            "args": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Optional extra Gradle arguments."
+            }
+          }
+        }
+      },
+      {
+        "name": "libs_catalog_read",
+        "displayName": "Read Version Catalog",
+        "modelDescription": "Read and parse libs.versions.toml for libraries, plugins, bundles and versions.",
+        "userDescription": "Reads libs.versions.toml from the workspace.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "libsCatalog",
+        "icon": "$(book)",
+        "tags": ["gradle", "catalog", "toml"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
         }
       }
     ]

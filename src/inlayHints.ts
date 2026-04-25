@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { VersionCatalog, findLibsReferences, resolveLibsRef } from './libs';
 import { isBuildScript } from './codelens';
+import { LatestVersionResolver } from './latestVersion';
 
 /**
  * Inlay-hint provider that shows the resolved version after every
@@ -11,21 +12,25 @@ export class LibsInlayHintsProvider implements vscode.InlayHintsProvider {
     private readonly _onDidChange = new vscode.EventEmitter<void>();
     readonly onDidChangeInlayHints = this._onDidChange.event;
 
-    constructor(private readonly catalogProvider: () => VersionCatalog | undefined) {}
+    constructor(
+        private readonly catalogProvider: () => VersionCatalog | undefined,
+        private readonly latestResolver = new LatestVersionResolver()
+    ) {}
 
     refresh(): void {
         this._onDidChange.fire();
     }
 
-    provideInlayHints(
+    async provideInlayHints(
         document: vscode.TextDocument,
         range: vscode.Range
-    ): vscode.InlayHint[] {
+    ): Promise<vscode.InlayHint[]> {
         const config = vscode.workspace.getConfiguration('gradleKotlin', document.uri);
         if (!config.get<boolean>('versionInlayHints.enabled', true)) return [];
         if (!isBuildScript(document)) return [];
         const catalog = this.catalogProvider();
         if (!catalog) return [];
+        const checkLatest = config.get<boolean>('versionInlayHints.checkLatest', true);
 
         const text = document.getText();
         const refs = findLibsReferences(text);
@@ -35,8 +40,18 @@ export class LibsInlayHintsProvider implements vscode.InlayHintsProvider {
             if (r.line < range.start.line || r.line > range.end.line) continue;
             const resolved = resolveLibsRef(catalog, r.ref);
             if (!resolved) continue;
+            let label = resolved.inlayLabel;
+            if (checkLatest && resolved.kind === 'library') {
+                const lib = catalog.libraries.get(resolved.alias);
+                if (lib?.version) {
+                    const latest = await this.latestResolver.latestForLibrary(lib);
+                    if (latest && latest !== lib.version) {
+                        label = `${lib.version} -> ${latest}`;
+                    }
+                }
+            }
             const pos = new vscode.Position(r.line, r.character + r.length);
-            const hint = new vscode.InlayHint(pos, `: ${resolved.inlayLabel}`, vscode.InlayHintKind.Type);
+            const hint = new vscode.InlayHint(pos, `: ${label}`, vscode.InlayHintKind.Type);
             hint.paddingLeft = false;
             hint.paddingRight = false;
             hint.tooltip = new vscode.MarkdownString(resolved.tooltip);

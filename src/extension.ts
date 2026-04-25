@@ -16,7 +16,7 @@ import { LibsCompletionProvider } from './completion';
 import { LibsDefinitionProvider } from './definition';
 import { LibsHoverProvider } from './hover';
 import { SettingsCodeActionProvider, addSubprojectCommand } from './codeActions';
-import { disposeDaemon, getDaemon } from './daemon';
+import { disposeDaemon, getDaemon, setDefaultInitScriptPath } from './daemon';
 import { createDaemonStatusItem } from './statusBar';
 import { registerGradleRunTool } from './aiTool';
 import { RecentRun, pushRecent } from './history';
@@ -38,6 +38,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     output = vscode.window.createOutputChannel('Gradle Kotlin');
     context.subscriptions.push(output);
 
+    setDefaultInitScriptPath(
+        context.asAbsolutePath(path.join('resources', 'gradle-kotlin.init.gradle.kts'))
+    );
     const daemon = getDaemon(output);
     context.subscriptions.push({ dispose: () => disposeDaemon() });
     context.subscriptions.push(createDaemonStatusItem(daemon));

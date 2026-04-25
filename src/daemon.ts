@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as fs from 'fs';
 import { resolveGradleCommand } from './gradle';
 
 /**
@@ -84,7 +85,14 @@ export class GradleDaemon implements vscode.Disposable {
         );
         const override = config.get<string>('gradleCommand') ?? '';
         const { command, cwd } = resolveGradleCommand(req.workspaceRoot, override);
-        const args = [...req.args, '--daemon', '--console=plain'];
+        const args = [...req.args];
+        const enableInitScript = config.get<boolean>('initScript.enabled', true);
+        const configuredInit = (config.get<string>('initScriptPath') ?? '').trim();
+        const initScript = configuredInit || defaultInitScriptPath;
+        if (enableInitScript && initScript && fs.existsSync(initScript)) {
+            args.push('-I', initScript);
+        }
+        args.push('--daemon', '--console=plain');
         const start = Date.now();
 
         this.output.appendLine(`\n> ${command} ${args.join(' ')}`);
@@ -168,6 +176,11 @@ export class GradleDaemon implements vscode.Disposable {
 }
 
 let singleton: GradleDaemon | undefined;
+let defaultInitScriptPath: string | undefined;
+
+export function setDefaultInitScriptPath(file: string | undefined): void {
+    defaultInitScriptPath = file;
+}
 
 export function getDaemon(output: vscode.OutputChannel): GradleDaemon {
     if (!singleton) singleton = new GradleDaemon(output);

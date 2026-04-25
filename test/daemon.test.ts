@@ -14,12 +14,16 @@ vi.mock('child_process', () => ({
     spawn: (...args: unknown[]) => spawnMock(...args),
 }));
 
-import { GradleDaemon } from '../src/daemon';
+import { GradleDaemon, setDefaultInitScriptPath } from '../src/daemon';
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 afterEach(() => {
     spawnMock.mockClear();
     queue.length = 0;
+    setDefaultInitScriptPath(undefined);
 });
 
 function makeChannel() {
@@ -74,5 +78,31 @@ describe('GradleDaemon', () => {
 
         fake.emit('close', 0);
         await p;
+    });
+
+    it('injects default init script with -I when enabled', async () => {
+        const fake = new FakeChild();
+        queue.push(fake);
+
+        const initScript = path.join(os.tmpdir(), `gradle-kotlin-${Date.now()}.init.gradle.kts`);
+        fs.writeFileSync(initScript, '// test init script\n', 'utf8');
+        setDefaultInitScriptPath(initScript);
+        const configSpy = vi
+            .spyOn(vscode.workspace, 'getConfiguration')
+            .mockReturnValue({
+                get: <T>(_k: string, d?: T) => d,
+            } as unknown as vscode.WorkspaceConfiguration);
+
+        const daemon = new GradleDaemon(makeChannel());
+        const p = daemon.run({ workspaceRoot: '/ws', args: [':help'] });
+        await Promise.resolve();
+        const args = spawnMock.mock.calls[0][1] as string[];
+        expect(args).toContain('-I');
+        expect(args).toContain(initScript);
+
+        fake.emit('close', 0);
+        await p;
+        configSpy.mockRestore();
+        fs.unlinkSync(initScript);
     });
 });
