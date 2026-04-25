@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { GradleModule, ModuleTreeNode, buildModuleTreeShape } from './gradle';
-import { GradleTask, discoverModuleTasksStatically } from './tasks';
+import { GradleTask, discoverModuleTasksStatically, qualifyTask } from './tasks';
 import { RecentRun, recentLabel } from './history';
 
 /**
@@ -53,6 +53,8 @@ export class GradleModulesProvider
 
     private modulesByWorkspace = new Map<string, GradleModule[]>();
     private recentByWorkspace = new Map<string, RecentRun[]>();
+    /** Currently-running task ids, keyed by `${workspaceRoot}::${qualifiedTask}`. */
+    private readonly runningTasks = new Set<string>();
     private taskResolver: (module: GradleModule) => GradleTask[] = m =>
         discoverModuleTasksStatically(m);
 
@@ -77,6 +79,25 @@ export class GradleModulesProvider
     setTaskResolver(resolver: (module: GradleModule) => GradleTask[]): void {
         this.taskResolver = resolver;
         this._onDidChangeTreeData.fire(undefined);
+    }
+
+    /**
+     * Mark a fully-qualified task (`:app:test`) as running so its sidebar
+     * row swaps the play icon for a spinner.  Pass `running=false` once
+     * the daemon invocation finishes.
+     */
+    setTaskRunning(workspaceRoot: string, qualifiedTask: string, running: boolean): void {
+        const key = `${workspaceRoot}::${qualifiedTask}`;
+        const had = this.runningTasks.has(key);
+        if (running) this.runningTasks.add(key);
+        else this.runningTasks.delete(key);
+        if (had !== running) this._onDidChangeTreeData.fire(undefined);
+    }
+
+    private isTaskRunning(element: ModuleTreeItemData): boolean {
+        if (element.kind !== 'task' || !element.task) return false;
+        const qualified = qualifyTask(element.task.projectPath, element.task.name);
+        return this.runningTasks.has(`${element.workspaceRoot}::${qualified}`);
     }
 
     refresh(): void {
@@ -135,9 +156,10 @@ export class GradleModulesProvider
                     };
                 }
                 break;
-            case 'task':
-                item.iconPath = new vscode.ThemeIcon('play');
-                item.description = element.task?.group;
+            case 'task': {
+                const running = this.isTaskRunning(element);
+                item.iconPath = new vscode.ThemeIcon(running ? 'loading~spin' : 'play');
+                item.description = running ? 'running…' : element.task?.group;
                 item.tooltip = element.task?.description ?? element.task?.name;
                 item.command = {
                     command: 'gradleKotlin.runTask',
@@ -145,6 +167,7 @@ export class GradleModulesProvider
                     arguments: [element],
                 };
                 break;
+            }
         }
         return item;
     }

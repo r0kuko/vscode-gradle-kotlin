@@ -224,27 +224,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
         }),
         vscode.commands.registerCommand('gradleKotlin.runTask', async (target: ModuleTreeItemData | GradleTask | undefined) => {
-            await runTaskCommand(daemon, target, recordRun);
+            await runTaskCommand(daemon, target, recordRun, {}, modulesProvider);
         }),
         vscode.commands.registerCommand('gradleKotlin.runTaskWithArgs', async (target: ModuleTreeItemData | GradleTask | undefined) => {
-            await runTaskCommand(daemon, target, recordRun, { promptForArgs: true });
+            await runTaskCommand(daemon, target, recordRun, { promptForArgs: true }, modulesProvider);
         }),
         vscode.commands.registerCommand('gradleKotlin.runTestsForTask', async (target: ModuleTreeItemData | GradleTask | undefined) => {
             await runTestsForTask(daemon, target, recordRun);
         }),
         vscode.commands.registerCommand('gradleKotlin.rerunRecent', async (run: RecentRun) => {
             if (!run) return;
-            const result = await runWithProgress(
-                daemon,
-                `Gradle: ${run.task}`,
-                { workspaceRoot: run.workspaceRoot, args: [run.task, ...run.args] }
-            );
-            await recordRun({
-                ...run,
-                timestamp: Date.now(),
-                exitCode: result.exitCode,
-                durationMs: result.durationMs,
-            });
+            modulesProvider.setTaskRunning(run.workspaceRoot, run.task, true);
+            try {
+                const result = await runWithProgress(
+                    daemon,
+                    `Gradle: ${run.task}`,
+                    { workspaceRoot: run.workspaceRoot, args: [run.task, ...run.args] }
+                );
+                await recordRun({
+                    ...run,
+                    timestamp: Date.now(),
+                    exitCode: result.exitCode,
+                    durationMs: result.durationMs,
+                });
+            } finally {
+                modulesProvider.setTaskRunning(run.workspaceRoot, run.task, false);
+            }
         }),
         vscode.commands.registerCommand('gradleKotlin.clearRecent', async () => {
             await context.workspaceState.update(HISTORY_KEY, []);
@@ -292,11 +297,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!pick) return;
             const folder = await pickWorkspaceFolderInteractive(undefined);
             if (!folder) return;
-            const result = await runWithProgress(daemon, `Gradle: ${pick}`, {
-                workspaceRoot: folder.uri.fsPath,
-                args: [pick],
-            });
-            await recordRun({ task: pick, args: [], workspaceRoot: folder.uri.fsPath, timestamp: Date.now(), exitCode: result.exitCode, durationMs: result.durationMs });
+            modulesProvider.setTaskRunning(folder.uri.fsPath, pick, true);
+            try {
+                const result = await runWithProgress(daemon, `Gradle: ${pick}`, {
+                    workspaceRoot: folder.uri.fsPath,
+                    args: [pick],
+                });
+                await recordRun({ task: pick, args: [], workspaceRoot: folder.uri.fsPath, timestamp: Date.now(), exitCode: result.exitCode, durationMs: result.durationMs });
+            } finally {
+                modulesProvider.setTaskRunning(folder.uri.fsPath, pick, false);
+            }
         }),
         vscode.commands.registerCommand('gradleKotlin.runAlias', async () => {
             const aliases = vscode.workspace.getConfiguration('gradleKotlin').get<Record<string, { task: string; args?: string[] }>>('aliases') ?? {};
@@ -344,10 +354,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!folder) return;
             const qualified = qualifiedFromTarget(target);
             if (!qualified) return;
-            await runWithProgress(daemon, `Gradle: ${qualified} (continuous)`, {
-                workspaceRoot: folder.uri.fsPath,
-                args: [qualified, '-t'],
-            });
+            modulesProvider.setTaskRunning(folder.uri.fsPath, qualified, true);
+            try {
+                await runWithProgress(daemon, `Gradle: ${qualified} (continuous)`, {
+                    workspaceRoot: folder.uri.fsPath,
+                    args: [qualified, '-t'],
+                });
+            } finally {
+                modulesProvider.setTaskRunning(folder.uri.fsPath, qualified, false);
+            }
         }),
         vscode.commands.registerCommand('gradleKotlin.toggleWrapperDistribution', async (uri?: vscode.Uri) => {
             const target = uri ?? vscode.window.activeTextEditor?.document.uri;
@@ -757,7 +772,8 @@ async function runTaskCommand(
     daemon: ReturnType<typeof getDaemon>,
     target: ModuleTreeItemData | GradleTask | undefined,
     recordRun: (r: RecentRun) => Promise<void>,
-    options: { promptForArgs?: boolean } = {}
+    options: { promptForArgs?: boolean } = {},
+    modulesProvider?: GradleModulesProvider
 ): Promise<void> {
     const folder = await pickWorkspaceFolderInteractive(target);
     if (!folder) return;
@@ -789,19 +805,24 @@ async function runTaskCommand(
         extraArgs = input.trim().length > 0 ? splitArgs(input) : [];
     }
 
-    const result = await runWithProgress(
-        daemon,
-        `Gradle: ${qualified}`,
-        { workspaceRoot: folder.uri.fsPath, args: [qualified, ...extraArgs] }
-    );
-    await recordRun({
-        task: qualified,
-        args: extraArgs,
-        workspaceRoot: folder.uri.fsPath,
-        timestamp: Date.now(),
-        exitCode: result.exitCode,
-        durationMs: result.durationMs,
-    });
+    modulesProvider?.setTaskRunning(folder.uri.fsPath, qualified, true);
+    try {
+        const result = await runWithProgress(
+            daemon,
+            `Gradle: ${qualified}`,
+            { workspaceRoot: folder.uri.fsPath, args: [qualified, ...extraArgs] }
+        );
+        await recordRun({
+            task: qualified,
+            args: extraArgs,
+            workspaceRoot: folder.uri.fsPath,
+            timestamp: Date.now(),
+            exitCode: result.exitCode,
+            durationMs: result.durationMs,
+        });
+    } finally {
+        modulesProvider?.setTaskRunning(folder.uri.fsPath, qualified, false);
+    }
 }
 
 async function runTestsForTask(
