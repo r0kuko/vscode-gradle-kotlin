@@ -13,6 +13,8 @@ export interface DiscoveredTestMethod {
     name: string;
     /** 0-based line offset in the source file. */
     line: number;
+    /** 0-based column where `fun <name>` starts. */
+    column: number;
 }
 
 export interface DiscoveredTestClass {
@@ -26,6 +28,8 @@ export interface DiscoveredTestClass {
     file: string;
     /** 0-based line of the class declaration. */
     line: number;
+    /** 0-based column where `class <Name>` starts. */
+    column: number;
     methods: DiscoveredTestMethod[];
 }
 
@@ -77,7 +81,7 @@ function safeRead(file: string): string | undefined {
 export function parseKotlinTestFile(file: string, text: string): DiscoveredTestClass[] {
     const lines = text.split(/\r?\n/);
     let pkg = '';
-    const classes: Array<{ name: string; line: number; bodyStart: number; bodyEnd: number }> = [];
+    const classes: Array<{ name: string; line: number; column: number; bodyStart: number; bodyEnd: number }> = [];
 
     // package + class boundaries
     let depth = 0;
@@ -88,11 +92,11 @@ export function parseKotlinTestFile(file: string, text: string): DiscoveredTestC
         if (line.startsWith('package ')) {
             pkg = line.replace(/^package\s+/, '').replace(/[;{].*$/, '').trim();
         }
-        const classMatch = /^(?:internal\s+|public\s+|open\s+|abstract\s+|sealed\s+|data\s+)*class\s+([A-Z][\w]*)/.exec(
-            line
+        const classMatch = /^(\s*)(?:internal\s+|public\s+|open\s+|abstract\s+|sealed\s+|data\s+)*class\s+([A-Z][\w]*)/.exec(
+            raw
         );
         if (classMatch && depth === 0) {
-            classes.push({ name: classMatch[1], line: i, bodyStart: i, bodyEnd: lines.length });
+            classes.push({ name: classMatch[2], line: i, column: classMatch[1].length, bodyStart: i, bodyEnd: lines.length });
             currentClassIdx = classes.length - 1;
         }
         // very rough brace depth tracking; comments / strings ignored on purpose
@@ -120,7 +124,7 @@ export function parseKotlinTestFile(file: string, text: string): DiscoveredTestC
             for (let j = i; j < Math.min(i + 8, lines.length); j++) {
                 const fn = /\bfun\s+(?:`([^`]+)`|([A-Za-z_][\w]*))\s*\(/.exec(lines[j]);
                 if (fn) {
-                    methods.push({ name: fn[1] ?? fn[2], line: j });
+                    methods.push({ name: fn[1] ?? fn[2], line: j, column: fn.index });
                     break;
                 }
             }
@@ -132,6 +136,7 @@ export function parseKotlinTestFile(file: string, text: string): DiscoveredTestC
             packageName: pkg,
             file,
             line: c.line,
+            column: c.column,
             methods,
         });
     }

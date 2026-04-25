@@ -48,6 +48,6 @@ class RootTest {
         expect(result).toHaveLength(1);
         expect(result[0].fqcn).toBe('RootTest');
         expect(result[0].packageName).toBe('');
-        expect(result[0].methods).toEqual([{ name: 'a', line: 3 }]);
+        expect(result[0].methods).toEqual([{ name: 'a', line: 3, column: expect.any(Number) }]);
     });
 });

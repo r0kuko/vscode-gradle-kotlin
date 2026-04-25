@@ -39,6 +39,15 @@ export function createTestController(
         true
     );
 
+    controller.createRunProfile(
+        'Debug Gradle Tests',
+        vscode.TestRunProfileKind.Debug,
+        async (request, token) => {
+            await runHandler(controller, daemon, listModules(), request, token, { debug: true });
+        },
+        false
+    );
+
     return controller;
 }
 
@@ -84,14 +93,14 @@ function buildClassItem(
         cls.simpleName,
         vscode.Uri.file(cls.file)
     );
-    classItem.range = new vscode.Range(cls.line, 0, cls.line, 0);
+    classItem.range = new vscode.Range(cls.line, cls.column, cls.line, cls.column + cls.simpleName.length);
     for (const m of cls.methods) {
         const methodItem = controller.createTestItem(
             methodId(module, cls.fqcn, m.name),
             m.name,
             vscode.Uri.file(cls.file)
         );
-        methodItem.range = new vscode.Range(m.line, 0, m.line, 0);
+        methodItem.range = new vscode.Range(m.line, m.column, m.line, m.column + m.name.length);
         classItem.children.add(methodItem);
     }
     return classItem;
@@ -126,7 +135,8 @@ async function runHandler(
     daemon: GradleDaemon,
     modules: GradleModule[],
     request: vscode.TestRunRequest,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
+    options: { debug?: boolean } = {}
 ): Promise<void> {
     const run = controller.createTestRun(request);
 
@@ -184,6 +194,12 @@ async function runHandler(
         const args: string[] = [qualifyTask(group.module.projectPath, 'test')];
         for (const pattern of group.patterns) {
             args.push('--tests', pattern);
+        }
+        if (options.debug) {
+            // Gradle test task understands --debug-jvm: it suspends the
+            // forked JVM on port 5005 so the user can attach with the
+            // built-in Java/Kotlin debugger.
+            args.push('--debug-jvm');
         }
         const before = Date.now();
         const result = await daemon.run({
