@@ -12,6 +12,7 @@ import { VersionCatalog, findCatalogFile, parseCatalogFile } from './libs';
 import { GradleModulesProvider, ModuleTreeItemData } from './treeProvider';
 import { GradleCodeLensProvider } from './codelens';
 import { LibsInlayHintsProvider } from './inlayHints';
+import { LatestVersionResolver } from './latestVersion';
 import { LibsCompletionProvider } from './completion';
 import { LibsDefinitionProvider } from './definition';
 import { LibsHoverProvider } from './hover';
@@ -61,7 +62,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(treeView);
 
     const codeLensProvider = new GradleCodeLensProvider();
-    const inlayProvider = new LibsInlayHintsProvider(() => activeCatalog());
+    const latestResolver = new LatestVersionResolver();
+    const inlayProvider = new LibsInlayHintsProvider(() => activeCatalog(), latestResolver);
     const completionProvider = new LibsCompletionProvider(() => activeCatalog());
     const definitionProvider = new LibsDefinitionProvider(() => activeCatalog());
     const hoverProvider = new LibsHoverProvider(() => activeCatalog());
@@ -202,6 +204,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.workspace.onDidChangeWorkspaceFolders(fire),
         vscode.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('gradleKotlin')) {
+                if (
+                    e.affectsConfiguration('gradleKotlin.versionInlayHints.checkLatest') ||
+                    e.affectsConfiguration('gradleKotlin.versionInlayHints.enabled')
+                ) {
+                    latestResolver.clearCache();
+                }
                 codeLensProvider.refresh();
                 inlayProvider.refresh();
             }
