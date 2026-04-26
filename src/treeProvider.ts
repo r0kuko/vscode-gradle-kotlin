@@ -14,18 +14,15 @@ export type TreeNodeKind =
     | 'module'
     | 'group'
     | 'tasksFolder'
-    | 'task'
-    | 'recentFolder'
-    | 'recentRun';
+    | 'taskGroup'
+    | 'task';
 
 export interface ModuleTreeItemData {
     kind: TreeNodeKind;
     workspaceRoot: string;
     module?: GradleModule;
     task?: GradleTask;
-    /** Recent run payload for kind === 'recentRun'. */
-    recent?: RecentRun;
-    /** For "group" nodes that are not real modules. */
+    /** Gradle task group name for kind === 'taskGroup'. Also used for 'group' (module path segment). */
     label?: string;
     /** Stable id for VS Code's TreeView reveal/refresh APIs. */
     id: string;
@@ -52,11 +49,12 @@ export class GradleModulesProvider
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     private modulesByWorkspace = new Map<string, GradleModule[]>();
-    private recentByWorkspace = new Map<string, RecentRun[]>();
     /** Currently-running task ids, keyed by `${workspaceRoot}::${qualifiedTask}`. */
     private readonly runningTasks = new Set<string>();
     private taskResolver: (module: GradleModule) => GradleTask[] = m =>
         discoverModuleTasksStatically(m);
+    /** Lower-cased filter string; empty string means no filter. */
+    private filterText = '';
 
     constructor(private readonly extensionPath: string) {}
 
@@ -65,20 +63,28 @@ export class GradleModulesProvider
         this._onDidChangeTreeData.fire(undefined);
     }
 
-    setRecent(workspaceRoot: string, runs: RecentRun[]): void {
-        this.recentByWorkspace.set(workspaceRoot, runs);
-        this._onDidChangeTreeData.fire(undefined);
-    }
-
     clear(): void {
         this.modulesByWorkspace.clear();
-        this.recentByWorkspace.clear();
         this._onDidChangeTreeData.fire(undefined);
     }
 
     setTaskResolver(resolver: (module: GradleModule) => GradleTask[]): void {
         this.taskResolver = resolver;
         this._onDidChangeTreeData.fire(undefined);
+    }
+
+    setFilter(text: string): void {
+        this.filterText = text.toLowerCase().trim();
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    clearFilter(): void {
+        this.filterText = '';
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    get hasFilter(): boolean {
+        return this.filterText.length > 0;
     }
 
     /**
@@ -136,30 +142,14 @@ export class GradleModulesProvider
             case 'tasksFolder':
                 item.iconPath = new vscode.ThemeIcon('list-tree');
                 break;
-            case 'recentFolder':
-                item.iconPath = new vscode.ThemeIcon('history');
-                item.tooltip = 'Recently run Gradle tasks';
-                break;
-            case 'recentRun':
-                item.iconPath = new vscode.ThemeIcon('debug-rerun');
-                item.description = element.recent
-                    ? new Date(element.recent.timestamp).toLocaleTimeString()
-                    : '';
-                item.tooltip =
-                    element.recent &&
-                    `${recentLabel(element.recent)}\nlast exit: ${element.recent.exitCode ?? '?'}`;
-                if (element.recent) {
-                    item.command = {
-                        command: 'gradleKotlin.rerunRecent',
-                        title: 'Re-run',
-                        arguments: [element.recent],
-                    };
-                }
+            case 'taskGroup':
+                item.iconPath = new vscode.ThemeIcon('folder');
+                item.tooltip = element.label;
                 break;
             case 'task': {
                 const running = this.isTaskRunning(element);
                 item.iconPath = new vscode.ThemeIcon(running ? 'loading~spin' : 'play');
-                item.description = running ? 'running…' : element.task?.group;
+                item.description = running ? 'running…' : undefined;
                 item.tooltip = element.task?.description ?? element.task?.name;
                 item.command = {
                     command: 'gradleKotlin.runTask',
@@ -174,17 +164,9 @@ export class GradleModulesProvider
 
     getChildren(element?: ModuleTreeItemData): ModuleTreeItemData[] {
         if (!element) {
-            // Top level: one workspace node per workspace folder, with the root module's tasks under it.
+            // Top level: one workspace node per workspace folder.
             const out: ModuleTreeItemData[] = [];
             for (const [workspaceRoot, modules] of this.modulesByWorkspace) {
-                const recent = this.recentByWorkspace.get(workspaceRoot) ?? [];
-                if (recent.length > 0) {
-                    out.push({
-                        kind: 'recentFolder',
-                        workspaceRoot,
-                        id: `${workspaceRoot}::recent`,
-                    });
-                }
                 const shape = buildModuleTreeShape(modules);
                 out.push(...this.materializeShape(shape, workspaceRoot, undefined));
             }
@@ -226,24 +208,59 @@ export class GradleModulesProvider
             case 'tasksFolder': {
                 if (!element.module) return [];
                 const tasks = this.taskResolver(element.module);
-                return tasks.map(t => ({
-                    kind: 'task',
+                // When a filter is active, show a flat filtered list (skipping groups).
+                if (this.filterText) {
+                    return tasks
+                        .filter(t => t.name.toLowerCase().includes(this.filterText))
+                        .map(t => ({
+                            kind: 'task' as const,
+                            workspaceRoot: element.workspaceRoot,
+                            module: element.module,
+                            task: t,
+                            id: `${element.id}::${t.name}`,
+                        }));
+                }
+                // Normal mode: group tasks.
+                const byGroup = new Map<string, GradleTask[]>();
+                for (const t of tasks) {
+                    const g = t.group ?? 'other';
+                    const list = byGroup.get(g) ?? [];
+                    list.push(t);
+                    byGroup.set(g, list);
+                }
+                const ORDER = ['build', 'verification', 'application', 'publishing', 'documentation', 'help', 'other'];
+                const sorted = [...byGroup.keys()].sort((a, b) => {
+                    const ai = ORDER.indexOf(a);
+                    const bi = ORDER.indexOf(b);
+                    if (ai !== -1 && bi !== -1) return ai - bi;
+                    if (ai !== -1) return -1;
+                    if (bi !== -1) return 1;
+                    return a.localeCompare(b);
+                });
+                return sorted.map(g => ({
+                    kind: 'taskGroup' as const,
                     workspaceRoot: element.workspaceRoot,
                     module: element.module,
-                    task: t,
-                    id: `${element.id}::${t.name}`,
+                    label: g,
+                    id: `${element.id}::group:${g}`,
                 }));
             }
-            case 'recentFolder': {
-                const recent = this.recentByWorkspace.get(element.workspaceRoot) ?? [];
-                return recent.map((r, idx) => ({
-                    kind: 'recentRun',
-                    workspaceRoot: element.workspaceRoot,
-                    recent: r,
-                    id: `${element.id}::${idx}::${r.task}`,
-                }));
+            case 'taskGroup': {
+                if (!element.module || !element.label) return [];
+                const tasks = this.taskResolver(element.module);
+                return tasks
+                    .filter(t =>
+                        (t.group ?? 'other') === element.label &&
+                        (!this.filterText || t.name.toLowerCase().includes(this.filterText))
+                    )
+                    .map(t => ({
+                        kind: 'task' as const,
+                        workspaceRoot: element.workspaceRoot,
+                        module: element.module,
+                        task: t,
+                        id: `${element.id}::${t.name}`,
+                    }));
             }
-            case 'recentRun':
             case 'task':
                 return [];
         }
@@ -285,10 +302,8 @@ export class GradleModulesProvider
                 return d.label?.split(':').filter(Boolean).pop() ?? '';
             case 'tasksFolder':
                 return 'Tasks';
-            case 'recentFolder':
-                return 'Recent';
-            case 'recentRun':
-                return d.recent ? recentLabel(d.recent) : '';
+            case 'taskGroup':
+                return d.label ?? '';
             case 'task':
                 return d.task?.name ?? '';
         }
@@ -297,11 +312,16 @@ export class GradleModulesProvider
     private collapsibleFor(d: ModuleTreeItemData): vscode.TreeItemCollapsibleState {
         switch (d.kind) {
             case 'task':
-            case 'recentRun':
                 return vscode.TreeItemCollapsibleState.None;
             case 'workspace':
-            case 'recentFolder':
                 return vscode.TreeItemCollapsibleState.Expanded;
+            case 'tasksFolder':
+                // Auto-expand when a filter is active so results are immediately visible.
+                return this.filterText
+                    ? vscode.TreeItemCollapsibleState.Expanded
+                    : vscode.TreeItemCollapsibleState.Collapsed;
+            case 'taskGroup':
+                return vscode.TreeItemCollapsibleState.Collapsed;
             default:
                 return vscode.TreeItemCollapsibleState.Collapsed;
         }
@@ -313,13 +333,11 @@ export class GradleModulesProvider
             case 'module':
                 return 'gradleModule';
             case 'task':
-                return 'gradleTask';
+                return this.isTaskRunning(d) ? 'gradleTaskRunning' : 'gradleTask';
             case 'tasksFolder':
                 return 'gradleTasksFolder';
-            case 'recentFolder':
-                return 'gradleRecentFolder';
-            case 'recentRun':
-                return 'gradleRecentRun';
+            case 'taskGroup':
+                return 'gradleTaskGroup';
             case 'group':
                 return 'gradleGroup';
         }
@@ -340,4 +358,99 @@ function findShapeNode(root: ModuleTreeNode, projectPath: string): ModuleTreeNod
         if (hit) return hit;
     }
     return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Recent Tasks view
+// ---------------------------------------------------------------------------
+
+/** Flat list of recent Gradle runs, shown in the "Recent Tasks" sidebar panel. */
+export class RecentTasksProvider implements vscode.TreeDataProvider<RecentRun | 'empty'> {
+    private readonly _onDidChangeTreeData = new vscode.EventEmitter<
+        RecentRun | 'empty' | undefined
+    >();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+    private runs: RecentRun[] = [];
+
+    setRecent(runs: RecentRun[]): void {
+        this.runs = runs;
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    clear(): void {
+        this.runs = [];
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    getTreeItem(element: RecentRun | 'empty'): vscode.TreeItem {
+        if (element === 'empty') {
+            const item = new vscode.TreeItem('No recent tasks');
+            item.iconPath = new vscode.ThemeIcon('info');
+            return item;
+        }
+        const item = new vscode.TreeItem(
+            recentLabel(element),
+            vscode.TreeItemCollapsibleState.None
+        );
+        item.description = new Date(element.timestamp).toLocaleTimeString();
+        item.tooltip = `${recentLabel(element)}\nlast exit: ${element.exitCode ?? '?'}`;
+        item.contextValue = 'gradleRecentRun';
+        item.iconPath = new vscode.ThemeIcon('debug-rerun');
+        item.command = {
+            command: 'gradleKotlin.rerunRecent',
+            title: 'Re-run',
+            arguments: [element],
+        };
+        return item;
+    }
+
+    getChildren(): (RecentRun | 'empty')[] {
+        if (this.runs.length === 0) return ['empty'];
+        return this.runs;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pinned Tasks view
+// ---------------------------------------------------------------------------
+
+/**
+ * Sidebar panel showing all pinned Gradle tasks (stored by their fully-qualified
+ * name, e.g. ":app:test").  Each row has a Run button and an Unpin button.
+ */
+export class PinnedTasksProvider implements vscode.TreeDataProvider<string | 'empty'> {
+    private readonly _onDidChangeTreeData = new vscode.EventEmitter<
+        string | 'empty' | undefined
+    >();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+    private pinned: string[] = [];
+
+    setPinned(tasks: string[]): void {
+        this.pinned = [...tasks];
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    getTreeItem(element: string | 'empty'): vscode.TreeItem {
+        if (element === 'empty') {
+            const item = new vscode.TreeItem('No pinned tasks');
+            item.iconPath = new vscode.ThemeIcon('info');
+            return item;
+        }
+        const item = new vscode.TreeItem(element, vscode.TreeItemCollapsibleState.None);
+        item.iconPath = new vscode.ThemeIcon('pin');
+        item.contextValue = 'gradlePinnedTask';
+        item.tooltip = `Run ${element}`;
+        item.command = {
+            command: 'gradleKotlin.runPinnedTask',
+            title: 'Run',
+            arguments: [element],
+        };
+        return item;
+    }
+
+    getChildren(): (string | 'empty')[] {
+        return this.pinned.length === 0 ? ['empty'] : this.pinned;
+    }
 }
