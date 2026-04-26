@@ -150,10 +150,24 @@ export function parseTasksAllOutput(text: string, projectPath: string): GradleTa
         const description = m[2]?.trim();
 
         const lastColon = fullName.lastIndexOf(':');
-        if (lastColon === -1) continue;
-        const owner = lastColon === 0 ? ':' : fullName.slice(0, lastColon);
+        let owner: string;
+        let taskName: string;
+        if (lastColon === -1) {
+            // No colon: root-level task (e.g. "help", "tasks")
+            owner = ':';
+            taskName = fullName;
+        } else if (lastColon === 0) {
+            owner = ':';
+            taskName = fullName.slice(1);
+        } else {
+            taskName = fullName.slice(lastColon + 1);
+            const rawOwner = fullName.slice(0, lastColon);
+            // Normalize relative path to absolute (e.g. "app" → ":app",
+            // "api:billing" → ":api:billing"). Root output uses relative
+            // paths; per-subproject output uses absolute ones already.
+            owner = rawOwner.startsWith(':') ? rawOwner : ':' + rawOwner;
+        }
         if (owner !== projectPath) continue;
-        const taskName = fullName.slice(lastColon + 1);
         if (!taskName || seen.has(taskName)) continue;
         seen.add(taskName);
         out.push({
