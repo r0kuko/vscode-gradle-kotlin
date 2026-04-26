@@ -23,6 +23,13 @@ export interface DaemonRunRequest {
     token?: vscode.CancellationToken;
     /** Called for every stdout/stderr chunk while the child is running. */
     onOutput?: (chunk: string, source: 'stdout' | 'stderr') => void;
+    /** Extra environment variables merged on top of process.env for this invocation. */
+    env?: Record<string, string>;
+    /**
+     * JVM arguments for the forked Gradle worker / task JVM.  Passed as
+     * `-Dorg.gradle.jvmargs=<jvmArgs>` so that, e.g., test tasks pick them up.
+     */
+    jvmArgs?: string;
 }
 
 export interface DaemonRunResult {
@@ -52,6 +59,8 @@ export class GradleDaemon implements vscode.Disposable {
     private readonly _onEvent = new vscode.EventEmitter<DaemonEvent>();
     /** Public event stream (used by status bar / task-history view). */
     readonly onEvent = this._onEvent.event;
+    /** Expose the shared output channel so callers can call show(). */
+    get channel(): vscode.OutputChannel { return this.output; }
     private activeCount = 0;
     private disposed = false;
 
@@ -94,10 +103,14 @@ export class GradleDaemon implements vscode.Disposable {
         if (enableInitScript && initScript && fs.existsSync(initScript)) {
             args.push('-I', initScript);
         }
+        if (req.jvmArgs) {
+            args.push(`-Dorg.gradle.jvmargs=${req.jvmArgs}`);
+        }
         args.push('--daemon', '--console=plain');
         const start = Date.now();
 
-        this.output.appendLine(`\n> ${command} ${args.join(' ')}`);
+        const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
+        this.output.appendLine(`\n[${ ts }] > ${command} ${args.join(' ')}`);
         this.output.show(true);
         this.activeCount++;
         this._onEvent.fire({ kind: 'start', workspaceRoot: req.workspaceRoot, args: req.args });
@@ -106,7 +119,7 @@ export class GradleDaemon implements vscode.Disposable {
             const child = cp.spawn(command, args, {
                 cwd,
                 shell: process.platform === 'win32',
-                env: process.env,
+                env: req.env ? { ...process.env, ...req.env } : process.env,
             });
 
             let stdout = '';

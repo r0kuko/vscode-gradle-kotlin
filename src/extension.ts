@@ -9,7 +9,8 @@ import {
     qualifyTask,
 } from './tasks';
 import { VersionCatalog, findCatalogFile, parseCatalogFile } from './libs';
-import { GradleModulesProvider, ModuleTreeItemData } from './treeProvider';
+import { GradleModulesProvider, ModuleTreeItemData, RecentTasksProvider, PinnedTasksProvider } from './treeProvider';
+import { DaemonsProvider } from './daemonsProvider';
 import { GradleCodeLensProvider } from './codelens';
 import { LibsInlayHintsProvider } from './inlayHints';
 import { LatestVersionResolver } from './latestVersion';
@@ -29,7 +30,7 @@ import {
 } from './propertiesProvider';
 import { findDuplicateDependencies, findUnusedPlugins } from './extraDiagnostics';
 import { disposeDaemon, getDaemon, setDefaultInitScriptPath } from './daemon';
-import { createDaemonStatusItem } from './statusBar';
+import { createDaemonStatusItem, createWrapperUpgradeItem } from './statusBar';
 import { createTestController } from './testController';
 import { registerGradleRunTool } from './aiTool';
 import { RecentRun, pushRecent } from './history';
@@ -69,12 +70,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push({ dispose: () => disposeDaemon() });
     context.subscriptions.push(createDaemonStatusItem(daemon));
 
+    // Wrapper upgrade badge — check in the background after activation.
+    const upgradeItem = createWrapperUpgradeItem();
+    context.subscriptions.push(upgradeItem);
+    void checkWrapperUpgradeBadge(upgradeItem);
+    // Re-check when any wrapper properties file changes.
+    const wrapperWatcher = vscode.workspace.createFileSystemWatcher(
+        '**/gradle/wrapper/gradle-wrapper.properties'
+    );
+    context.subscriptions.push(wrapperWatcher);
+    wrapperWatcher.onDidChange(() => { upgradeItem.hide(); void checkWrapperUpgradeBadge(upgradeItem); });
+    wrapperWatcher.onDidCreate(() => { upgradeItem.hide(); void checkWrapperUpgradeBadge(upgradeItem); });
+
     const buildDiagnostics = vscode.languages.createDiagnosticCollection('gradleKotlin');
     context.subscriptions.push(buildDiagnostics);
     context.subscriptions.push(
         daemon.onEvent(event => {
             if (event.kind !== 'finish' || !event.result) return;
             updateBuildDiagnostics(buildDiagnostics, event.workspaceRoot, event.result.combined);
+            // On failure, surface a notification so the user knows to check output.
+            if (event.result.exitCode !== 0 && event.result.exitCode !== null) {
+                vscode.window
+                    .showErrorMessage(
+                        `Gradle task failed (exit ${event.result.exitCode}). Check the output for details.`,
+                        'Show Output'
+                    )
+                    .then(choice => {
+                        if (choice === 'Show Output') daemon.channel.show(false);
+                    });
+            }
         })
     );
 
@@ -86,11 +110,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     const modulesProvider = new GradleModulesProvider(context.extensionPath);
     modulesProvider.setTaskResolver(module => mergedTasks(module));
-    const treeView = vscode.window.createTreeView('gradleKotlin.modulesView', {
+    const treeView = vscode.window.createTreeView('gradleKotlin.projectsView', {
         treeDataProvider: modulesProvider,
         showCollapseAll: true,
     });
     context.subscriptions.push(treeView);
+
+    const recentTasksProvider = new RecentTasksProvider();
+    const recentView = vscode.window.createTreeView('gradleKotlin.recentTasksView', {
+        treeDataProvider: recentTasksProvider,
+    });
+    context.subscriptions.push(recentView);
+
+    const daemonsProvider = new DaemonsProvider(() => {
+        const folders = vscode.workspace.workspaceFolders ?? [];
+        return folders[0]?.uri.fsPath;
+    });
+    const daemonsView = vscode.window.createTreeView('gradleKotlin.daemonsView', {
+        treeDataProvider: daemonsProvider,
+    });
+    context.subscriptions.push(daemonsView);
+
+    const pinnedTasksProvider = new PinnedTasksProvider();
+    const pinnedView = vscode.window.createTreeView('gradleKotlin.pinnedTasksView', {
+        treeDataProvider: pinnedTasksProvider,
+    });
+    context.subscriptions.push(pinnedView);
+
+    /** CancellationTokenSources for tasks currently running from the sidebar. */
+    const runningTaskCancels = new Map<string, vscode.CancellationTokenSource>();
 
     const codeLensProvider = new GradleCodeLensProvider();
     const latestResolver = new LatestVersionResolver();
@@ -189,26 +237,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     // Commands ----------------------------------------------------------------
-    const recentByWorkspace = new Map<string, RecentRun[]>();
     const loadRecent = (): RecentRun[] =>
         context.workspaceState.get<RecentRun[]>(HISTORY_KEY, []) ?? [];
-    for (const r of loadRecent()) {
-        const list = recentByWorkspace.get(r.workspaceRoot) ?? [];
-        list.push(r);
-        recentByWorkspace.set(r.workspaceRoot, list);
-    }
-    for (const [ws, list] of recentByWorkspace) modulesProvider.setRecent(ws, list);
+    recentTasksProvider.setRecent(loadRecent());
+
+    const loadPinned = (): string[] =>
+        context.workspaceState.get<string[]>(PINNED_KEY, []) ?? [];
+    pinnedTasksProvider.setPinned(loadPinned());
 
     const recordRun = async (run: RecentRun) => {
         const merged = pushRecent(loadRecent(), run);
         await context.workspaceState.update(HISTORY_KEY, merged);
-        const grouped = new Map<string, RecentRun[]>();
-        for (const r of merged) {
-            const list = grouped.get(r.workspaceRoot) ?? [];
-            list.push(r);
-            grouped.set(r.workspaceRoot, list);
-        }
-        for (const [ws, list] of grouped) modulesProvider.setRecent(ws, list);
+        recentTasksProvider.setRecent(merged);
     };
 
     context.subscriptions.push(
@@ -224,22 +264,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
         }),
         vscode.commands.registerCommand('gradleKotlin.runTask', async (target: ModuleTreeItemData | GradleTask | undefined) => {
-            await runTaskCommand(daemon, target, recordRun, {}, modulesProvider);
+            await runTaskCommand(daemon, target, recordRun, {}, modulesProvider, runningTaskCancels);
         }),
         vscode.commands.registerCommand('gradleKotlin.runTaskWithArgs', async (target: ModuleTreeItemData | GradleTask | undefined) => {
-            await runTaskCommand(daemon, target, recordRun, { promptForArgs: true }, modulesProvider);
+            await runTaskCommand(daemon, target, recordRun, { promptForArgs: true }, modulesProvider, runningTaskCancels);
         }),
         vscode.commands.registerCommand('gradleKotlin.runTestsForTask', async (target: ModuleTreeItemData | GradleTask | undefined) => {
             await runTestsForTask(daemon, target, recordRun);
         }),
         vscode.commands.registerCommand('gradleKotlin.rerunRecent', async (run: RecentRun) => {
             if (!run) return;
+            const cts = new vscode.CancellationTokenSource();
+            const cancelKey = `${run.workspaceRoot}::${run.task}`;
+            runningTaskCancels.set(cancelKey, cts);
             modulesProvider.setTaskRunning(run.workspaceRoot, run.task, true);
             try {
                 const result = await runWithProgress(
                     daemon,
                     `Gradle: ${run.task}`,
-                    { workspaceRoot: run.workspaceRoot, args: [run.task, ...run.args] }
+                    { workspaceRoot: run.workspaceRoot, args: [run.task, ...run.args] },
+                    cts
                 );
                 await recordRun({
                     ...run,
@@ -248,12 +292,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     durationMs: result.durationMs,
                 });
             } finally {
+                cts.dispose();
+                runningTaskCancels.delete(cancelKey);
                 modulesProvider.setTaskRunning(run.workspaceRoot, run.task, false);
             }
         }),
         vscode.commands.registerCommand('gradleKotlin.clearRecent', async () => {
             await context.workspaceState.update(HISTORY_KEY, []);
-            for (const ws of recentByWorkspace.keys()) modulesProvider.setRecent(ws, []);
+            recentTasksProvider.clear();
         }),
         vscode.commands.registerCommand('gradleKotlin.runDependencies', async (uri?: vscode.Uri) => {
             await runDependencies(daemon, uri);
@@ -271,21 +317,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.commands.registerCommand('gradleKotlin.stopDaemon', async () => {
             const folder = pickWorkspaceFolder();
-            if (folder) await daemon.stopAll(folder.uri.fsPath);
+            if (folder) {
+                await daemon.stopAll(folder.uri.fsPath);
+                await daemonsProvider.reload();
+            }
         }),
         vscode.commands.registerCommand('gradleKotlin.pinTask', async (target: ModuleTreeItemData | GradleTask | undefined) => {
             const qualified = qualifiedFromTarget(target);
             if (!qualified) return;
-            const list = context.workspaceState.get<string[]>(PINNED_KEY, []) ?? [];
+            const list = loadPinned();
             if (!list.includes(qualified)) {
-                await context.workspaceState.update(PINNED_KEY, [qualified, ...list]);
+                const next = [qualified, ...list];
+                await context.workspaceState.update(PINNED_KEY, next);
+                pinnedTasksProvider.setPinned(next);
                 vscode.window.setStatusBarMessage(`Pinned ${qualified}`, 3000);
             }
         }),
-        vscode.commands.registerCommand('gradleKotlin.unpinTask', async (qualified?: string) => {
-            const list = context.workspaceState.get<string[]>(PINNED_KEY, []) ?? [];
-            const next = list.filter(t => t !== qualified);
+        vscode.commands.registerCommand('gradleKotlin.unpinTask', async (target: ModuleTreeItemData | GradleTask | string | undefined) => {
+            const qualified = typeof target === 'string' ? target : qualifiedFromTarget(target as ModuleTreeItemData | GradleTask | undefined);
+            if (!qualified) return;
+            const next = loadPinned().filter(t => t !== qualified);
             await context.workspaceState.update(PINNED_KEY, next);
+            pinnedTasksProvider.setPinned(next);
         }),
         vscode.commands.registerCommand('gradleKotlin.runPinned', async () => {
             const list = context.workspaceState.get<string[]>(PINNED_KEY, []) ?? [];
@@ -354,13 +407,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!folder) return;
             const qualified = qualifiedFromTarget(target);
             if (!qualified) return;
+            const cts = new vscode.CancellationTokenSource();
+            const cancelKey = `${folder.uri.fsPath}::${qualified}`;
+            runningTaskCancels.set(cancelKey, cts);
             modulesProvider.setTaskRunning(folder.uri.fsPath, qualified, true);
             try {
                 await runWithProgress(daemon, `Gradle: ${qualified} (continuous)`, {
                     workspaceRoot: folder.uri.fsPath,
                     args: [qualified, '-t'],
-                });
+                }, cts);
             } finally {
+                cts.dispose();
+                runningTaskCancels.delete(cancelKey);
                 modulesProvider.setTaskRunning(folder.uri.fsPath, qualified, false);
             }
         }),
@@ -374,6 +432,180 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const newText = rewriteDistributionUrl(text, distributionUrlFor(parsed.version, flipped));
             await vscode.workspace.fs.writeFile(target, Buffer.from(newText, 'utf8'));
             vscode.window.setStatusBarMessage(`Wrapper distribution → ${flipped}`, 3000);
+        }),
+        vscode.commands.registerCommand('gradleKotlin.refreshDaemons', () => daemonsProvider.reload()),
+        vscode.commands.registerCommand('gradleKotlin.stopSingleDaemon', async (info: import('./daemonsProvider').GradleDaemonInfo) => {
+            if (!info?.pid) return;
+            await daemonsProvider.stopDaemon(info);
+        }),
+        vscode.commands.registerCommand('gradleKotlin.stopAllDaemons', async () => {
+            const folder = pickWorkspaceFolder();
+            if (!folder) return;
+            const choice = await vscode.window.showWarningMessage(
+                'Stop all Gradle daemons for this workspace?',
+                { modal: true },
+                'Stop All'
+            );
+            if (choice !== 'Stop All') return;
+            await daemon.stopAll(folder.uri.fsPath);
+            await daemonsProvider.reload();
+        }),
+
+        // Feature 1: Cancel a running task from the sidebar tree.
+        vscode.commands.registerCommand('gradleKotlin.cancelTask', (target: ModuleTreeItemData) => {
+            const qualified = qualifiedFromTarget(target);
+            if (!qualified || !target.workspaceRoot) return;
+            runningTaskCancels.get(`${target.workspaceRoot}::${qualified}`)?.cancel();
+        }),
+
+        // Feature 2: Run a task from the Pinned Tasks panel.
+        vscode.commands.registerCommand('gradleKotlin.runPinnedTask', async (qualified: string) => {
+            if (!qualified) return;
+            const folder = await pickWorkspaceFolderInteractive(undefined);
+            if (!folder) return;
+            const cts = new vscode.CancellationTokenSource();
+            const cancelKey = `${folder.uri.fsPath}::${qualified}`;
+            runningTaskCancels.set(cancelKey, cts);
+            modulesProvider.setTaskRunning(folder.uri.fsPath, qualified, true);
+            try {
+                const result = await runWithProgress(
+                    daemon, `Gradle: ${qualified}`,
+                    { workspaceRoot: folder.uri.fsPath, args: [qualified] },
+                    cts
+                );
+                await recordRun({ task: qualified, args: [], workspaceRoot: folder.uri.fsPath, timestamp: Date.now(), exitCode: result.exitCode, durationMs: result.durationMs });
+            } finally {
+                cts.dispose();
+                runningTaskCancels.delete(cancelKey);
+                modulesProvider.setTaskRunning(folder.uri.fsPath, qualified, false);
+            }
+        }),
+
+        // Feature 3: Filter tasks in the Gradle Projects tree.
+        vscode.commands.registerCommand('gradleKotlin.filterTasks', async () => {
+            const current = modulesProvider.hasFilter ? '(currently filtered)' : '';
+            const input = await vscode.window.showInputBox({
+                prompt: `Filter Gradle tasks by name ${current}`,
+                placeHolder: 'e.g. test, assemble, boot',
+                value: '',
+            });
+            if (input === undefined) return; // cancelled
+            if (input.trim() === '') {
+                modulesProvider.clearFilter();
+            } else {
+                modulesProvider.setFilter(input.trim());
+            }
+        }),
+        vscode.commands.registerCommand('gradleKotlin.clearFilter', () => {
+            modulesProvider.clearFilter();
+        }),
+
+        // Feature 4: Run a task with JDWP debug and auto-attach the Java debugger.
+        vscode.commands.registerCommand('gradleKotlin.runTaskDebug', async (target: ModuleTreeItemData | GradleTask | undefined) => {
+            const folder = await pickWorkspaceFolderInteractive(target);
+            if (!folder) return;
+            let qualified = qualifiedFromTarget(target);
+            if (!qualified) {
+                const taskName = await vscode.window.showInputBox({
+                    prompt: 'Gradle task to debug (e.g. :app:test, bootRun)',
+                    placeHolder: ':app:bootRun',
+                });
+                if (!taskName) return;
+                qualified = taskName.startsWith(':') ? taskName : ':' + taskName;
+            }
+            const debugPort = vscode.workspace.getConfiguration('gradleKotlin').get<number>('debugPort', 5005);
+            let debugAttached = false;
+            const cts = new vscode.CancellationTokenSource();
+            const cancelKey = `${folder.uri.fsPath}::${qualified}`;
+            runningTaskCancels.set(cancelKey, cts);
+            modulesProvider.setTaskRunning(folder.uri.fsPath, qualified, true);
+            try {
+                await runWithProgress(
+                    daemon,
+                    `Gradle: ${qualified} (debug on port ${debugPort})`,
+                    {
+                        workspaceRoot: folder.uri.fsPath,
+                        args: [qualified, '--debug-jvm'],
+                        onOutput: (chunk: string) => {
+                            if (!debugAttached && chunk.includes('Listening for transport dt_socket')) {
+                                debugAttached = true;
+                                void vscode.debug.startDebugging(folder, {
+                                    type: 'java',
+                                    request: 'attach',
+                                    name: `Attach Gradle: ${qualified}`,
+                                    hostName: 'localhost',
+                                    port: debugPort,
+                                }).then(started => {
+                                    if (!started) {
+                                        vscode.window.showWarningMessage(
+                                            'Could not attach Java debugger. Is the Java Debugger extension installed?'
+                                        );
+                                    }
+                                });
+                            }
+                        },
+                    },
+                    cts
+                );
+            } finally {
+                cts.dispose();
+                runningTaskCancels.delete(cancelKey);
+                modulesProvider.setTaskRunning(folder.uri.fsPath, qualified, false);
+            }
+        }),
+
+        // Feature 5: Run a task with custom JVM args and environment variables.
+        vscode.commands.registerCommand('gradleKotlin.runTaskWithEnv', async (target: ModuleTreeItemData | GradleTask | undefined) => {
+            const folder = await pickWorkspaceFolderInteractive(target);
+            if (!folder) return;
+            let qualified = qualifiedFromTarget(target);
+            if (!qualified) {
+                const taskName = await vscode.window.showInputBox({
+                    prompt: 'Gradle task to run',
+                    placeHolder: ':app:test',
+                });
+                if (!taskName) return;
+                qualified = taskName.startsWith(':') ? taskName : ':' + taskName;
+            }
+            const jvmArgsInput = await vscode.window.showInputBox({
+                prompt: `JVM args for ${qualified}`,
+                placeHolder: '-Xmx2g -Dfoo=bar',
+                ignoreFocusOut: true,
+            });
+            if (jvmArgsInput === undefined) return;
+            const envInput = await vscode.window.showInputBox({
+                prompt: 'Extra environment variables (KEY=VALUE, space-separated)',
+                placeHolder: 'SPRING_PROFILES_ACTIVE=test DEBUG=true',
+                ignoreFocusOut: true,
+            });
+            if (envInput === undefined) return;
+            const env: Record<string, string> = {};
+            for (const pair of envInput.trim().split(/\s+/).filter(Boolean)) {
+                const eq = pair.indexOf('=');
+                if (eq > 0) env[pair.slice(0, eq)] = pair.slice(eq + 1);
+            }
+            const cts = new vscode.CancellationTokenSource();
+            const cancelKey = `${folder.uri.fsPath}::${qualified}`;
+            runningTaskCancels.set(cancelKey, cts);
+            modulesProvider.setTaskRunning(folder.uri.fsPath, qualified, true);
+            try {
+                const result = await runWithProgress(
+                    daemon,
+                    `Gradle: ${qualified} (custom env)`,
+                    {
+                        workspaceRoot: folder.uri.fsPath,
+                        args: [qualified],
+                        jvmArgs: jvmArgsInput.trim() || undefined,
+                        env: Object.keys(env).length > 0 ? env : undefined,
+                    },
+                    cts
+                );
+                await recordRun({ task: qualified, args: [], workspaceRoot: folder.uri.fsPath, timestamp: Date.now(), exitCode: result.exitCode, durationMs: result.durationMs });
+            } finally {
+                cts.dispose();
+                runningTaskCancels.delete(cancelKey);
+                modulesProvider.setTaskRunning(folder.uri.fsPath, qualified, false);
+            }
         })
     );
 
@@ -429,6 +661,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
     await hydrateAllTasks(daemon, modulesProvider);
     refreshTestController(testController);
+    void daemonsProvider.reload();
 }
 
 export function deactivate(): void {
@@ -504,23 +737,25 @@ async function hydrateAllTasks(
     daemon: ReturnType<typeof getDaemon>,
     treeProvider: GradleModulesProvider
 ): Promise<void> {
-    // Run each workspace in parallel; modules within a workspace stay
-    // serialized because the daemon already serializes per workspaceRoot.
+    // Run a single root-level :tasks --all per workspace instead of one
+    // invocation per subproject. The root output lists ALL tasks for ALL
+    // subprojects as "sub:taskName - description", which parseTasksAllOutput
+    // can parse by normalizing the relative project paths.
     await Promise.all(
         Array.from(workspaces.values()).map(async ws => {
-            for (const module of ws.modules) {
-                try {
-                    const result = await daemon.run({
-                        workspaceRoot: ws.folder.uri.fsPath,
-                        args: [qualifyTask(module.projectPath, 'tasks'), '--all', '--quiet'],
-                    });
+            try {
+                const result = await daemon.run({
+                    workspaceRoot: ws.folder.uri.fsPath,
+                    args: ['tasks', '--all', '--quiet'],
+                });
+                for (const module of ws.modules) {
                     const parsed = parseTasksAllOutput(result.combined, module.projectPath);
                     if (parsed.length > 0) {
                         dynamicTasksByModule.set(moduleKey(module), parsed);
                     }
-                } catch {
-                    // Best-effort only: static tasks remain available.
                 }
+            } catch {
+                // Best-effort only: static tasks remain available.
             }
             treeProvider.refresh();
         })
@@ -613,6 +848,36 @@ async function fetchLatestGradleVersion(): Promise<string | undefined> {
         return typeof data.version === 'string' ? data.version : undefined;
     } catch {
         return undefined;
+    }
+}
+
+/**
+ * Fetch the latest Gradle release and, if any workspace wrapper is outdated,
+ * show the upgrade badge in the status bar.
+ */
+async function checkWrapperUpgradeBadge(item: vscode.StatusBarItem): Promise<void> {
+    const latest = await fetchLatestGradleVersion();
+    if (!latest) return;
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    for (const folder of folders) {
+        const files = await vscode.workspace.findFiles(
+            new vscode.RelativePattern(folder, '**/gradle/wrapper/gradle-wrapper.properties'),
+            null,
+            1
+        );
+        if (files.length === 0) continue;
+        try {
+            const text = (await vscode.workspace.fs.readFile(files[0])).toString();
+            const parsed = parseWrapperProperties(text);
+            if (parsed && compareVersions(latest, parsed.version) > 0) {
+                item.text = `$(arrow-up) Gradle ${parsed.version} → ${latest}`;
+                item.tooltip = `A newer Gradle is available. Click to upgrade to ${latest}.`;
+                item.show();
+                return; // show once for the first outdated workspace
+            }
+        } catch {
+            /* ignore unreadable files */
+        }
     }
 }
 /**
@@ -725,13 +990,33 @@ function updateBuildDiagnostics(
 }
 
 /**
+ * Link two cancellation tokens: the combined token is cancelled when EITHER fires.
+ */
+function createCombinedToken(
+    a: vscode.CancellationToken,
+    b: vscode.CancellationToken
+): vscode.CancellationToken {
+    const cts = new vscode.CancellationTokenSource();
+    if (a.isCancellationRequested || b.isCancellationRequested) {
+        cts.cancel();
+    } else {
+        a.onCancellationRequested(() => cts.cancel());
+        b.onCancellationRequested(() => cts.cancel());
+    }
+    return cts.token;
+}
+
+/**
  * Run a Gradle invocation through the shared daemon while showing a
  * cancellable notification. Cancelling the notification SIGTERMs the child.
+ * An optional `externalCts` lets callers (e.g. the tree-view cancel button)
+ * also trigger cancellation independently of the notification.
  */
 function runWithProgress(
     daemon: ReturnType<typeof getDaemon>,
     title: string,
-    request: { workspaceRoot: string; args: string[] }
+    request: Parameters<ReturnType<typeof getDaemon>['run']>[0],
+    externalCts?: vscode.CancellationTokenSource
 ): Thenable<import('./daemon').DaemonRunResult> {
     return vscode.window.withProgress(
         {
@@ -739,12 +1024,18 @@ function runWithProgress(
             title,
             cancellable: true,
         },
-        async (progress, token) => {
+        async (progress, progressToken) => {
+            // If the user clicks cancel on the progress notification, also cancel the external CTS.
+            progressToken.onCancellationRequested(() => externalCts?.cancel());
+            const token = externalCts
+                ? createCombinedToken(externalCts.token, progressToken)
+                : progressToken;
             let buf = '';
+            const callerOnOutput = request.onOutput;
             const result = await daemon.run({
                 ...request,
                 token,
-                onOutput: chunk => {
+                onOutput: (chunk, source) => {
                     buf += chunk;
                     // Keep only the trailing tail — we just want the most
                     // recent non-empty line as a progress message.
@@ -756,6 +1047,7 @@ function runWithProgress(
                         progress.report({ message: line.length > 120 ? line.slice(0, 117) + '…' : line });
                         break;
                     }
+                    callerOnOutput?.(chunk, source);
                 },
             });
             const scanUrls = extractBuildScanUrls(result.combined);
@@ -778,7 +1070,8 @@ async function runTaskCommand(
     target: ModuleTreeItemData | GradleTask | undefined,
     recordRun: (r: RecentRun) => Promise<void>,
     options: { promptForArgs?: boolean } = {},
-    modulesProvider?: GradleModulesProvider
+    modulesProvider?: GradleModulesProvider,
+    runningTaskCancels?: Map<string, vscode.CancellationTokenSource>
 ): Promise<void> {
     const folder = await pickWorkspaceFolderInteractive(target);
     if (!folder) return;
@@ -810,12 +1103,16 @@ async function runTaskCommand(
         extraArgs = input.trim().length > 0 ? splitArgs(input) : [];
     }
 
+    const cts = new vscode.CancellationTokenSource();
+    const cancelKey = `${folder.uri.fsPath}::${qualified}`;
+    runningTaskCancels?.set(cancelKey, cts);
     modulesProvider?.setTaskRunning(folder.uri.fsPath, qualified, true);
     try {
         const result = await runWithProgress(
             daemon,
             `Gradle: ${qualified}`,
-            { workspaceRoot: folder.uri.fsPath, args: [qualified, ...extraArgs] }
+            { workspaceRoot: folder.uri.fsPath, args: [qualified, ...extraArgs] },
+            cts
         );
         await recordRun({
             task: qualified,
@@ -826,6 +1123,8 @@ async function runTaskCommand(
             durationMs: result.durationMs,
         });
     } finally {
+        cts.dispose();
+        runningTaskCancels?.delete(cancelKey);
         modulesProvider?.setTaskRunning(folder.uri.fsPath, qualified, false);
     }
 }

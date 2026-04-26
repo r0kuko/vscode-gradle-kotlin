@@ -3,7 +3,7 @@ import { GradleDaemon } from './daemon';
 
 /**
  * Tiny status-bar item that mirrors the Gradle daemon's activity.
- *  - idle      → `$(rocket) Gradle`
+ *  - idle      → `$(gradle-kotlin) Gradle`
  *  - running   → `$(sync~spin) Gradle: <task>`
  * Clicking it stops the daemon.
  */
@@ -16,7 +16,7 @@ export function createDaemonStatusItem(daemon: GradleDaemon): vscode.StatusBarIt
         if (daemon.running > 0) {
             item.text = `$(sync~spin) Gradle${lastTask ? ': ' + lastTask : ''}`;
         } else {
-            item.text = '$(rocket) Gradle';
+            item.text = '$(gradle-kotlin) Gradle';
         }
     };
     render();
@@ -27,5 +27,17 @@ export function createDaemonStatusItem(daemon: GradleDaemon): vscode.StatusBarIt
         }
         render();
     });
+    return item;
+}
+
+/**
+ * Status-bar badge shown when a newer Gradle wrapper version is available.
+ * Hidden by default; call `checkAndShowWrapperUpgrade` to populate it.
+ */
+export function createWrapperUpgradeItem(): vscode.StatusBarItem {
+    const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
+    item.command = 'gradleKotlin.upgradeWrapper';
+    item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    item.hide();
     return item;
 }

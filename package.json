@@ -76,11 +76,32 @@
           "additionalProperties": {
             "type": "object",
             "properties": {
-              "task": { "type": "string" },
-              "args": { "type": "array", "items": { "type": "string" } }
+              "task": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
             },
             "required": ["task"]
           }
+        },
+        "gradleKotlin.debugPort": {
+          "type": "number",
+          "default": 5005,
+          "description": "JDWP port used when attaching the Java debugger after 'Run Task with Debug'. Gradle is invoked with --debug-jvm; the Java debugger attaches to this port."
+        }
+      }
+    },
+    "icons": {
+      "gradle-kotlin": {
+        "description": "Gradle elephant icon",
+        "default": {
+          "fontPath": "./images/fonts/gradle-kotlin.woff2",
+          "fontCharacter": "\uF101"
         }
       }
     },
@@ -170,6 +191,24 @@
         "category": "Gradle Kotlin"
       },
       {
+        "command": "gradleKotlin.refreshDaemons",
+        "title": "Gradle: Refresh Daemons",
+        "category": "Gradle Kotlin",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gradleKotlin.stopAllDaemons",
+        "title": "Gradle: Stop All Daemons",
+        "category": "Gradle Kotlin",
+        "icon": "$(stop-circle)"
+      },
+      {
+        "command": "gradleKotlin.stopSingleDaemon",
+        "title": "Gradle: Stop This Daemon",
+        "category": "Gradle Kotlin",
+        "icon": "$(stop-circle)"
+      },
+      {
         "command": "gradleKotlin.pinTask",
         "title": "Gradle: Pin Task",
         "category": "Gradle Kotlin",
@@ -209,72 +248,259 @@
         "command": "gradleKotlin.moveLiteralToCatalog",
         "title": "Gradle: Move Literal Dependency to Version Catalog",
         "category": "Gradle Kotlin"
+      },
+      {
+        "command": "gradleKotlin.cancelTask",
+        "title": "Gradle: Cancel Running Task",
+        "category": "Gradle Kotlin",
+        "icon": "$(stop-circle)"
+      },
+      {
+        "command": "gradleKotlin.filterTasks",
+        "title": "Gradle: Filter Tasks…",
+        "category": "Gradle Kotlin",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "gradleKotlin.clearFilter",
+        "title": "Gradle: Clear Task Filter",
+        "category": "Gradle Kotlin",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "gradleKotlin.runTaskDebug",
+        "title": "Gradle: Run Task with Debug (JDWP)…",
+        "category": "Gradle Kotlin",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "gradleKotlin.runTaskWithEnv",
+        "title": "Gradle: Run Task with JVM Args / Env Vars…",
+        "category": "Gradle Kotlin",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "gradleKotlin.runPinnedTask",
+        "title": "Gradle: Run Pinned Task",
+        "category": "Gradle Kotlin",
+        "icon": "$(play)"
       }
     ],
     "menus": {
       "commandPalette": [
-        { "command": "gradleKotlin.refresh", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.reloadProject", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.upgradeWrapper", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.runTask", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.runTaskWithArgs", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.runTestsForTask", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.rerunRecent", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.clearRecent", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.runDependencies", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.addSubproject", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.openModule", "when": "false" },
-        { "command": "gradleKotlin.stopDaemon", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.pinTask", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.runPinned", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.runAlias", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.runMany", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.runTaskContinuous", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.toggleWrapperDistribution", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.cycleDependencyConfiguration", "when": "gradleKotlin.isGradleProject" },
-        { "command": "gradleKotlin.moveLiteralToCatalog", "when": "gradleKotlin.isGradleProject" }
+        {
+          "command": "gradleKotlin.refresh",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.reloadProject",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.upgradeWrapper",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.runTask",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.runTaskWithArgs",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.runTestsForTask",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.rerunRecent",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.clearRecent",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.runDependencies",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.addSubproject",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.openModule",
+          "when": "false"
+        },
+        {
+          "command": "gradleKotlin.stopDaemon",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.refreshDaemons",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.stopAllDaemons",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.stopSingleDaemon",
+          "when": "false"
+        },
+        {
+          "command": "gradleKotlin.pinTask",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.runPinned",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.runAlias",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.runMany",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.runTaskContinuous",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.toggleWrapperDistribution",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.cycleDependencyConfiguration",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.moveLiteralToCatalog",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.cancelTask",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.filterTasks",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.clearFilter",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.runTaskDebug",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.runTaskWithEnv",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.runPinnedTask",
+          "when": "false"
+        }
       ],
       "view/title": [
         {
           "command": "gradleKotlin.refresh",
-          "when": "view == gradleKotlin.modulesView",
+          "when": "view == gradleKotlin.projectsView",
           "group": "navigation"
         },
         {
+          "command": "gradleKotlin.filterTasks",
+          "when": "view == gradleKotlin.projectsView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "gradleKotlin.clearFilter",
+          "when": "view == gradleKotlin.projectsView",
+          "group": "navigation@3"
+        },
+        {
           "command": "gradleKotlin.reloadProject",
-          "when": "view == gradleKotlin.modulesView",
+          "when": "view == gradleKotlin.projectsView",
           "group": "navigation"
         },
         {
           "command": "gradleKotlin.clearRecent",
-          "when": "view == gradleKotlin.modulesView",
+          "when": "view == gradleKotlin.recentTasksView",
+          "group": "navigation"
+        },
+        {
+          "command": "gradleKotlin.refreshDaemons",
+          "when": "view == gradleKotlin.daemonsView",
+          "group": "navigation"
+        },
+        {
+          "command": "gradleKotlin.stopAllDaemons",
+          "when": "view == gradleKotlin.daemonsView",
           "group": "navigation"
         }
       ],
       "view/item/context": [
         {
           "command": "gradleKotlin.runTask",
-          "when": "view == gradleKotlin.modulesView && viewItem == gradleTask",
+          "when": "view == gradleKotlin.projectsView && viewItem == gradleTask",
           "group": "inline"
         },
         {
           "command": "gradleKotlin.runTaskWithArgs",
-          "when": "view == gradleKotlin.modulesView && viewItem == gradleTask",
+          "when": "view == gradleKotlin.projectsView && viewItem == gradleTask",
           "group": "inline@2"
         },
         {
           "command": "gradleKotlin.runTestsForTask",
-          "when": "view == gradleKotlin.modulesView && viewItem == gradleTask",
+          "when": "view == gradleKotlin.projectsView && viewItem == gradleTask",
           "group": "inline@3"
         },
         {
+          "command": "gradleKotlin.runTaskDebug",
+          "when": "view == gradleKotlin.projectsView && viewItem == gradleTask",
+          "group": "2_debug"
+        },
+        {
+          "command": "gradleKotlin.runTaskWithEnv",
+          "when": "view == gradleKotlin.projectsView && viewItem == gradleTask",
+          "group": "2_debug"
+        },
+        {
+          "command": "gradleKotlin.pinTask",
+          "when": "view == gradleKotlin.projectsView && viewItem == gradleTask",
+          "group": "3_pin"
+        },
+        {
+          "command": "gradleKotlin.cancelTask",
+          "when": "view == gradleKotlin.projectsView && viewItem == gradleTaskRunning",
+          "group": "inline"
+        },
+        {
           "command": "gradleKotlin.openModule",
-          "when": "view == gradleKotlin.modulesView && viewItem == gradleModule",
+          "when": "view == gradleKotlin.projectsView && viewItem == gradleModule",
           "group": "inline"
         },
         {
           "command": "gradleKotlin.rerunRecent",
-          "when": "view == gradleKotlin.modulesView && viewItem == gradleRecentRun",
+          "when": "view == gradleKotlin.recentTasksView && viewItem == gradleRecentRun",
+          "group": "inline"
+        },
+        {
+          "command": "gradleKotlin.runPinnedTask",
+          "when": "view == gradleKotlin.pinnedTasksView && viewItem == gradlePinnedTask",
+          "group": "inline"
+        },
+        {
+          "command": "gradleKotlin.unpinTask",
+          "when": "view == gradleKotlin.pinnedTasksView && viewItem == gradlePinnedTask",
+          "group": "inline@2"
+        },
+        {
+          "command": "gradleKotlin.stopSingleDaemon",
+          "when": "view == gradleKotlin.daemonsView && viewItem == gradleDaemonAlive",
           "group": "inline"
         }
       ],
@@ -289,9 +515,27 @@
     "views": {
       "gradleKotlin": [
         {
-          "id": "gradleKotlin.modulesView",
-          "name": "Gradle Modules",
+          "id": "gradleKotlin.projectsView",
+          "name": "Gradle Projects",
           "icon": "images/icons/gradle.svg",
+          "contextualTitle": "Gradle",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "id": "gradleKotlin.recentTasksView",
+          "name": "Recent Tasks",
+          "contextualTitle": "Gradle",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "id": "gradleKotlin.pinnedTasksView",
+          "name": "Pinned Tasks",
+          "contextualTitle": "Gradle",
+          "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "id": "gradleKotlin.daemonsView",
+          "name": "Gradle Daemons",
           "contextualTitle": "Gradle",
           "when": "gradleKotlin.isGradleProject"
         }
@@ -329,7 +573,9 @@
             },
             "args": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Optional extra Gradle arguments (e.g. ['--info', '--rerun-tasks'])."
             }
           },
@@ -373,7 +619,9 @@
             },
             "args": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Optional extra Gradle arguments."
             }
           }
@@ -405,8 +653,14 @@
         "inputSchema": {
           "type": "object",
           "properties": {
-            "query": { "type": "string", "description": "Free-text search term, e.g. 'ktor server core' or 'g:io.ktor a:ktor-server-core'." },
-            "rows": { "type": "integer", "description": "Maximum results to return (default 20)." }
+            "query": {
+              "type": "string",
+              "description": "Free-text search term, e.g. 'ktor server core' or 'g:io.ktor a:ktor-server-core'."
+            },
+            "rows": {
+              "type": "integer",
+              "description": "Maximum results to return (default 20)."
+            }
           },
           "required": ["query"]
         }
@@ -421,13 +675,15 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "npm run compile:e2e && node out-e2e/test-e2e/runTest.js",
-    "icon": "node scripts/generate_icon.js"
+    "icon": "node scripts/generate_icon.js",
+    "generate-font": "node scripts/generate_font.js"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.7",
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.95.0",
     "@vscode/test-electron": "^2.4.1",
+    "fantasticon": "^4.1.0",
     "mocha": "^10.7.0",
     "sharp": "^0.34.5",
     "typescript": "^5.4.0",
