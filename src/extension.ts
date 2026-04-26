@@ -35,7 +35,10 @@ import { createTestController } from './testController';
 import { registerGradleRunTool } from './aiTool';
 import { RecentRun, pushRecent } from './history';
 import { splitArgs } from './argSplit';
-import { parseGradleDiagnostics } from './buildDiagnostics';
+import {
+    parseGradleDiagnostics,
+    normalizeFilePath,
+} from './buildDiagnostics';
 import {
     compareVersions,
     distributionUrlFor,
@@ -962,9 +965,12 @@ function updateBuildDiagnostics(
     combined: string
 ): void {
     const parsed = parseGradleDiagnostics(combined);
+    const normalRoot = path.normalize(workspaceRoot);
     const byFile = new Map<string, vscode.Diagnostic[]>();
     for (const d of parsed) {
-        if (!d.file.startsWith(workspaceRoot)) continue;
+        const absFile = normalizeFilePath(d.file, workspaceRoot);
+        // Only surface diagnostics that belong to this workspace.
+        if (!absFile.startsWith(normalRoot)) continue;
         const range = new vscode.Range(d.line, d.column, d.line, d.column + 1);
         const diag = new vscode.Diagnostic(
             range,
@@ -974,14 +980,14 @@ function updateBuildDiagnostics(
                 : vscode.DiagnosticSeverity.Warning
         );
         diag.source = 'gradle';
-        const list = byFile.get(d.file) ?? [];
+        const list = byFile.get(absFile) ?? [];
         list.push(diag);
-        byFile.set(d.file, list);
+        byFile.set(absFile, list);
     }
     // Clear old diagnostics for this workspace before publishing fresh ones.
     const stale: vscode.Uri[] = [];
     collection.forEach(uri => {
-        if (uri.fsPath.startsWith(workspaceRoot)) stale.push(uri);
+        if (uri.fsPath.startsWith(normalRoot)) stale.push(uri);
     });
     for (const uri of stale) collection.delete(uri);
     for (const [file, diags] of byFile) {

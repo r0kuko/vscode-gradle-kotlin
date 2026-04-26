@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseGradleDiagnostics } from '../src/buildDiagnostics';
+import * as path from 'path';
+import { parseGradleDiagnostics, normalizeFilePath } from '../src/buildDiagnostics';
 
 describe('parseGradleDiagnostics', () => {
     it('extracts kotlin compiler errors', () => {
@@ -53,5 +54,70 @@ Build file '/ws/app/build.gradle.kts' line: 7
         expect(out).toHaveLength(1);
         expect(out[0].column).toBe(2);
         expect(out[0].message).toBe('Type mismatch: expected Int');
+    });
+
+    it('handles colon-separated message (modern Kotlin format)', () => {
+        const out = parseGradleDiagnostics(
+            "e: file:///ws/app/src/main/kotlin/Foo.kt:20:13: Unresolved reference: bar\n" +
+            "w: file:///ws/app/src/main/kotlin/Foo.kt:21:1: Variable 'x' is never used\n"
+        );
+        expect(out).toEqual([
+            {
+                file: '/ws/app/src/main/kotlin/Foo.kt',
+                line: 19,
+                column: 12,
+                severity: 'error',
+                message: 'Unresolved reference: bar',
+            },
+            {
+                file: '/ws/app/src/main/kotlin/Foo.kt',
+                line: 20,
+                column: 0,
+                severity: 'warning',
+                message: "Variable 'x' is never used",
+            },
+        ]);
+    });
+
+    it('handles legacy Kotlin 1.x bare-path format', () => {
+        const out = parseGradleDiagnostics(
+            "e: /ws/app/src/main/kotlin/Foo.kt: (15, 9): Unresolved reference: baz\n"
+        );
+        expect(out).toEqual([
+            {
+                file: '/ws/app/src/main/kotlin/Foo.kt',
+                line: 14,
+                column: 8,
+                severity: 'error',
+                message: 'Unresolved reference: baz',
+            },
+        ]);
+    });
+
+    it('does not duplicate legacy entry already covered by URI format', () => {
+        // Both formats pointing to same file+line — only the URI one should survive.
+        const out = parseGradleDiagnostics(
+            "e: file:///ws/Foo.kt:10:5 error from URI\n" +
+            "e: /ws/Foo.kt: (10, 5): error from bare path\n"
+        );
+        expect(out).toHaveLength(1);
+        expect(out[0].message).toBe('error from URI');
+    });
+});
+
+describe('normalizeFilePath', () => {
+    it('returns absolute paths unchanged (Unix)', () => {
+        const result = normalizeFilePath('/home/user/project/file.kt', '/home/user/project');
+        expect(result).toBe(path.normalize('/home/user/project/file.kt'));
+    });
+
+    it('resolves relative paths against workspaceRoot', () => {
+        const result = normalizeFilePath('app/src/Foo.kt', '/home/user/project');
+        expect(result).toBe(path.normalize('/home/user/project/app/src/Foo.kt'));
+    });
+
+    it('strips leading slash from Windows drive paths (/C:/... → C:/...)', () => {
+        const result = normalizeFilePath('/C:/Users/project/file.kt', 'C:/Users/project');
+        expect(result).toBe(path.normalize('C:/Users/project/file.kt'));
     });
 });
