@@ -9,3 +9,4 @@ sample/**/.gradle/
 sample/.kotlin/
 .gradle/
 build/
+.DS_Store
