@@ -21,7 +21,9 @@ import * as os from 'os';
 import * as path from 'path';
 
 afterEach(() => {
+    vi.useRealTimers();
     spawnMock.mockClear();
+    vi.restoreAllMocks();
     queue.length = 0;
     setDefaultInitScriptPath(undefined);
 });
@@ -80,6 +82,43 @@ describe('GradleDaemon', () => {
         await p;
     });
 
+    it('uses --no-daemon automatically when Gradle for Java is installed', async () => {
+        const fake = new FakeChild();
+        queue.push(fake);
+        vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue({ id: 'vscjava.vscode-gradle' } as never);
+
+        const daemon = new GradleDaemon(makeChannel());
+        const p = daemon.run({ workspaceRoot: '/ws', args: [':help'] });
+        await Promise.resolve();
+
+        const args = spawnMock.mock.calls[0][1] as string[];
+        expect(args).toContain('--no-daemon');
+        expect(args).not.toContain('--daemon');
+
+        fake.emit('close', 0);
+        await p;
+    });
+
+    it('can force --daemon even when Gradle for Java is installed', async () => {
+        const fake = new FakeChild();
+        queue.push(fake);
+        vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue({ id: 'vscjava.vscode-gradle' } as never);
+        vi.spyOn(vscode.workspace, 'getConfiguration').mockReturnValue({
+            get: <T>(key: string, defaultValue?: T) => key === 'daemon.mode' ? 'always' as T : defaultValue,
+        } as unknown as vscode.WorkspaceConfiguration);
+
+        const daemon = new GradleDaemon(makeChannel());
+        const p = daemon.run({ workspaceRoot: '/ws', args: [':help'] });
+        await Promise.resolve();
+
+        const args = spawnMock.mock.calls[0][1] as string[];
+        expect(args).toContain('--daemon');
+        expect(args).not.toContain('--no-daemon');
+
+        fake.emit('close', 0);
+        await p;
+    });
+
     it('injects default init script with -I when enabled', async () => {
         const fake = new FakeChild();
         queue.push(fake);
@@ -104,5 +143,25 @@ describe('GradleDaemon', () => {
         await p;
         configSpy.mockRestore();
         fs.unlinkSync(initScript);
+    });
+
+    it('settles when the child exits but close is not observed', async () => {
+        vi.useFakeTimers();
+        const fake = new FakeChild();
+        queue.push(fake);
+
+        const daemon = new GradleDaemon(makeChannel());
+        const p = daemon.run({ workspaceRoot: '/ws', args: [':broken'] });
+        await Promise.resolve();
+
+        fake.stderr.emit('data', Buffer.from('failure\n'));
+        fake.emit('exit', 1);
+        await vi.advanceTimersByTimeAsync(1_500);
+
+        const result = await p;
+        expect(result.exitCode).toBe(1);
+        expect(result.combined).toContain('failure');
+        expect(result.combined).toContain('stdio did not close');
+        expect(daemon.running).toBe(0);
     });
 });

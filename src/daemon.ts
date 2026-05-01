@@ -6,7 +6,7 @@ import { resolveGradleCommand } from './gradle';
 /**
  * Long-lived Gradle "daemon" wrapper.
  *
- * Gradle itself already runs as a daemon (we just rely on `--daemon`). Our
+ * Gradle itself can run as a daemon. Our
  * job is to:
  *   - serialize task invocations per workspace folder so we don't fork
  *     dozens of competing JVMs (what Copilot used to do when calling
@@ -45,13 +45,14 @@ export interface DaemonRunResult {
 export interface DaemonEvent {
     kind: 'start' | 'finish';
     workspaceRoot: string;
-    /** The args we passed to gradle (without the appended --daemon flags). */
+    /** The args we passed to gradle (without the appended daemon / console flags). */
     args: string[];
     /** Set on `finish` only. */
     result?: DaemonRunResult;
 }
 
 const MAX_BUFFER = 8 * 1024 * 1024;
+const GRADLE_FOR_JAVA_EXTENSION_ID = 'vscjava.vscode-gradle';
 
 export class GradleDaemon implements vscode.Disposable {
     private queue = new Map<string, Promise<unknown>>();
@@ -106,7 +107,7 @@ export class GradleDaemon implements vscode.Disposable {
         if (req.jvmArgs) {
             args.push(`-Dorg.gradle.jvmargs=${req.jvmArgs}`);
         }
-        args.push('--daemon', '--console=plain');
+        args.push(resolveDaemonFlag(config), '--console=plain');
         const start = Date.now();
 
         const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -125,13 +126,46 @@ export class GradleDaemon implements vscode.Disposable {
             let stdout = '';
             let stderr = '';
             let combined = '';
+            let settled = false;
+            let exitFallback: NodeJS.Timeout | undefined;
+            let forceKill: NodeJS.Timeout | undefined;
+            let cancel: vscode.Disposable | undefined;
 
-            const cancel = req.token?.onCancellationRequested(() => {
+            const settle = (exitCode: number | null, extraStderr = '', extraCombined = '') => {
+                if (settled) return;
+                settled = true;
+                if (exitFallback) clearTimeout(exitFallback);
+                if (forceKill) clearTimeout(forceKill);
+                cancel?.dispose();
+                if (extraStderr) stderr += extraStderr;
+                if (extraCombined) combined += extraCombined;
+                this.output.appendLine(`\n[exit ${exitCode}] ${command} ${args.join(' ')}`);
+                const result: DaemonRunResult = {
+                    exitCode,
+                    stdout,
+                    stderr,
+                    combined,
+                    durationMs: Date.now() - start,
+                };
+                this.activeCount = Math.max(0, this.activeCount - 1);
+                this._onEvent.fire({ kind: 'finish', workspaceRoot: req.workspaceRoot, args: req.args, result });
+                resolve(result);
+            };
+
+            cancel = req.token?.onCancellationRequested(() => {
+                this.output.appendLine('\n[cancelled] Gradle invocation cancelled.');
                 try {
-                    child.kill('SIGTERM');
+                    killChild(child, false);
                 } catch {
                     /* ignore */
                 }
+                forceKill = setTimeout(() => {
+                    try {
+                        killChild(child, true);
+                    } catch {
+                        /* ignore */
+                    }
+                }, 5_000);
             });
 
             child.stdout.on('data', (b: Buffer) => {
@@ -149,32 +183,18 @@ export class GradleDaemon implements vscode.Disposable {
                 req.onOutput?.(s, 'stderr');
             });
             child.on('error', err => {
-                cancel?.dispose();
                 this.output.appendLine(`\n[ERROR] Failed to spawn ${command}: ${err.message}`);
-                const result: DaemonRunResult = {
-                    exitCode: -1,
-                    stdout,
-                    stderr: stderr + err.message,
-                    combined: combined + err.message,
-                    durationMs: Date.now() - start,
-                };
-                this.activeCount = Math.max(0, this.activeCount - 1);
-                this._onEvent.fire({ kind: 'finish', workspaceRoot: req.workspaceRoot, args: req.args, result });
-                resolve(result);
+                settle(-1, err.message, err.message);
+            });
+            child.on('exit', code => {
+                exitFallback = setTimeout(() => {
+                    const msg = '\n[WARN] Gradle process exited but stdio did not close; returning collected output.\n';
+                    this.output.append(msg);
+                    settle(code, msg, msg);
+                }, 1_500);
             });
             child.on('close', code => {
-                cancel?.dispose();
-                this.output.appendLine(`\n[exit ${code}] ${command} ${args.join(' ')}`);
-                const result: DaemonRunResult = {
-                    exitCode: code,
-                    stdout,
-                    stderr,
-                    combined,
-                    durationMs: Date.now() - start,
-                };
-                this.activeCount = Math.max(0, this.activeCount - 1);
-                this._onEvent.fire({ kind: 'finish', workspaceRoot: req.workspaceRoot, args: req.args, result });
-                resolve(result);
+                settle(code);
             });
         });
     }
@@ -207,4 +227,24 @@ export function getDaemon(output: vscode.OutputChannel): GradleDaemon {
 export function disposeDaemon(): void {
     singleton?.dispose();
     singleton = undefined;
+}
+
+function killChild(child: cp.ChildProcess, force: boolean): void {
+    if (process.platform === 'win32' && child.pid) {
+        cp.exec(`taskkill /PID ${child.pid} /T ${force ? '/F' : ''}`, () => undefined);
+        return;
+    }
+    child.kill(force ? 'SIGKILL' : 'SIGTERM');
+}
+
+function resolveDaemonFlag(config: vscode.WorkspaceConfiguration): '--daemon' | '--no-daemon' {
+    const daemonEnabled = config.get<boolean>('daemon.enabled', true);
+    if (!daemonEnabled) return '--no-daemon';
+
+    const mode = config.get<string>('daemon.mode', 'auto');
+    if (mode === 'always') return '--daemon';
+    if (mode === 'never') return '--no-daemon';
+
+    const gradleForJavaInstalled = !!vscode.extensions.getExtension(GRADLE_FOR_JAVA_EXTENSION_ID);
+    return gradleForJavaInstalled ? '--no-daemon' : '--daemon';
 }

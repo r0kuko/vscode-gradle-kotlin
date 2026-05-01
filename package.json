@@ -1,7 +1,7 @@
 {
   "name": "vscode-gradle-kotlin",
   "displayName": "Gradle Kotlin Companion",
-  "description": "JetBrains-style Gradle/Kotlin DSL experience for VS Code: module tree, run tasks, reload-project actions, libs.versions.toml inlay hints & completion, and a long-lived Gradle daemon exposed as a Copilot tool.",
+  "description": "JetBrains-style Gradle/Kotlin DSL experience for VS Code: module tree, run tasks, reload-project actions, libs.versions.toml inlay hints & completion, and a shared Gradle execution path exposed as a Copilot tool.",
   "version": "0.1.2",
   "publisher": "r0kuko",
   "license": "MIT",
@@ -57,7 +57,13 @@
         "gradleKotlin.daemon.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Keep a long-lived Gradle daemon (via --daemon) and expose it to Copilot through the language-model tool 'gradle_run'."
+          "description": "Allow Gradle Kotlin Companion to use a Gradle daemon when the daemon mode permits it. Disable to always pass --no-daemon."
+        },
+        "gradleKotlin.daemon.mode": {
+          "type": "string",
+          "enum": ["auto", "always", "never"],
+          "default": "auto",
+          "description": "Controls whether Gradle invocations use --daemon. 'auto' uses --no-daemon when Gradle for Java is installed, avoiding a second persistent Gradle daemon."
         },
         "gradleKotlin.initScript.enabled": {
           "type": "boolean",
@@ -68,6 +74,18 @@
           "type": "string",
           "default": "",
           "description": "Optional absolute path of an init.gradle(.kts) script to inject. When empty, the bundled extension init script is used."
+        },
+        "gradleKotlin.gradleForJava.integrationMode": {
+          "type": "string",
+          "enum": ["takeover", "coexist", "off"],
+          "default": "takeover",
+          "description": "Controls how this extension handles Gradle for Java. 'takeover' disables Gradle for Java task auto-detection and Java Gradle Build Server for the workspace; 'coexist' disables only task auto-detection; 'off' leaves Gradle for Java untouched."
+        },
+        "gradleKotlin.taskDiscovery.autoHydrateOnActivation": {
+          "type": "string",
+          "enum": ["auto", "always", "never"],
+          "default": "auto",
+          "description": "Controls whether activation eagerly runs 'tasks --all' to hydrate dynamic Gradle tasks. 'auto' skips eager hydration when Gradle for Java is installed to avoid overlapping project import."
         },
         "gradleKotlin.aliases": {
           "type": "object",
@@ -554,8 +572,8 @@
       {
         "name": "gradle_run",
         "displayName": "Run Gradle Task",
-        "modelDescription": "Invoke a Gradle task in the user's workspace through a long-lived Gradle daemon. Use this instead of spawning './gradlew' through a terminal — it reuses the same daemon across calls and avoids spawning competing JVMs. Supports passing the project path (e.g. ':app'), task name (e.g. 'test', 'build', 'dependencies'), and optional extra arguments. Returns the combined stdout/stderr and the exit code.",
-        "userDescription": "Lets Copilot run Gradle tasks via the shared daemon.",
+        "modelDescription": "Invoke a Gradle task in the user's workspace through Gradle Kotlin Companion's shared serialized runner. Use this instead of spawning './gradlew' through a terminal — it avoids competing invocations and automatically uses --no-daemon when Gradle for Java is installed. Supports passing the project path (e.g. ':app'), task name (e.g. 'test', 'build', 'dependencies'), and optional extra arguments. Returns the combined stdout/stderr and the exit code.",
+        "userDescription": "Lets Copilot run Gradle tasks via the shared runner.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "gradle",
         "icon": "$(symbol-method)",

@@ -51,6 +51,8 @@ const PINNED_KEY = 'gradleKotlin.pinnedTasks';
 
 const HISTORY_KEY = 'gradleKotlin.recentRuns';
 
+const GRADLE_FOR_JAVA_EXTENSION_ID = 'vscjava.vscode-gradle';
+
 let output: vscode.OutputChannel;
 
 interface WorkspaceState {
@@ -255,7 +257,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     };
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('gradleKotlin.refresh', () => refreshAll(modulesProvider, codeLensProvider, inlayProvider)),
+        vscode.commands.registerCommand('gradleKotlin.refresh', async () => {
+            await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
+            await hydrateAllTasks(daemon, modulesProvider);
+        }),
         vscode.commands.registerCommand('gradleKotlin.cycleDependencyConfiguration', cycleDependencyConfigurationCommand),
         vscode.commands.registerCommand('gradleKotlin.moveLiteralToCatalog', moveLiteralToCatalogCommand),
         vscode.commands.registerCommand('gradleKotlin.reloadProject', async () => {
@@ -661,8 +666,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return out;
     });
 
+    const gradleForJavaInstalled = isGradleForJavaInstalled();
+    await coordinateGradleForJava(gradleForJavaInstalled);
     await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
-    await hydrateAllTasks(daemon, modulesProvider);
+    if (shouldHydrateTasksOnActivation(gradleForJavaInstalled)) {
+        await hydrateAllTasks(daemon, modulesProvider);
+    } else if (gradleForJavaInstalled) {
+        output.appendLine(
+            'Gradle for Java detected; skipped eager tasks --all hydration to avoid overlapping project import. Use Gradle: Refresh Modules to hydrate dynamic tasks on demand.'
+        );
+    }
     refreshTestController(testController);
     void daemonsProvider.reload();
 }
@@ -716,6 +729,43 @@ async function refreshAll(
 /** Re-discover Kotlin tests under each module so the Test Explorer stays in sync. */
 function refreshTestController(controller: vscode.TestController | undefined): void {
     controller?.resolveHandler?.(undefined);
+}
+
+function isGradleForJavaInstalled(): boolean {
+    return !!vscode.extensions.getExtension(GRADLE_FOR_JAVA_EXTENSION_ID);
+}
+
+async function coordinateGradleForJava(installed: boolean): Promise<void> {
+    if (!installed) return;
+    const config = vscode.workspace.getConfiguration('gradleKotlin');
+    const mode = config.get<string>('gradleForJava.integrationMode', 'takeover');
+    if (mode === 'off') return;
+
+    const gradleConfig = vscode.workspace.getConfiguration('gradle');
+    if (gradleConfig.get<string>('autoDetect') !== 'off') {
+        await gradleConfig.update('autoDetect', 'off', vscode.ConfigurationTarget.Workspace);
+        output.appendLine(
+            'Gradle for Java detected; set workspace gradle.autoDetect=off so Gradle Kotlin Companion owns Gradle task discovery.'
+        );
+    }
+
+    if (mode === 'takeover') {
+        const javaGradleConfig = vscode.workspace.getConfiguration('java.gradle');
+        if (javaGradleConfig.get<string>('buildServer.enabled') !== 'off') {
+            await javaGradleConfig.update('buildServer.enabled', 'off', vscode.ConfigurationTarget.Workspace);
+            output.appendLine(
+                'Gradle for Java detected; set workspace java.gradle.buildServer.enabled=off so Gradle Kotlin Companion is the primary Gradle integration.'
+            );
+        }
+    }
+}
+
+function shouldHydrateTasksOnActivation(gradleForJavaInstalled: boolean): boolean {
+    const config = vscode.workspace.getConfiguration('gradleKotlin');
+    const mode = config.get<string>('taskDiscovery.autoHydrateOnActivation', 'auto');
+    if (mode === 'always') return true;
+    if (mode === 'never') return false;
+    return !gradleForJavaInstalled;
 }
 
 function moduleKey(module: GradleModule): string {

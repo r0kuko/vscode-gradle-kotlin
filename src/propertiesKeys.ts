@@ -44,7 +44,7 @@ export const PROPERTY_DOCS: PropertyDoc[] = [
     },
     {
         key: 'org.gradle.daemon',
-        summary: 'Whether the long-lived Gradle daemon process should be reused. Disabling forces a fresh JVM per build.',
+        summary: 'Whether Gradle may keep a daemon process alive between builds. Disabling reduces idle memory at the cost of startup time.',
         defaultValue: 'true',
     },
     {
