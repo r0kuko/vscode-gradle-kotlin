@@ -83,24 +83,22 @@ Companion treats that extension as something to take over by default,
 using only public VS Code settings so the behavior is explicit and
 reversible:
 
-- uses `--no-daemon` by default for its own Gradle invocations, avoiding
-  a second persistent Gradle daemon in memory;
+- routes task runs, task hydration, reloads, wrapper upgrades and daemon
+  status checks through the same serialized Gradle runner;
+- uses `--daemon` by default for its own Gradle invocations, so repeated
+  Gradle Kotlin Companion tasks reuse the Gradle daemon;
 - sets workspace `gradle.autoDetect = off`, so Gradle for Java does not
   also auto-discover Gradle tasks;
 - sets workspace `java.gradle.buildServer.enabled = off`, so Gradle for
-  Java does not keep its Gradle Build Server path alive;
-- skips eager `tasks --all` hydration on activation, avoiding overlap
-  with Gradle for Java project import. Use **Gradle: Refresh Modules** to
-  hydrate dynamic tasks on demand.
+  Java does not keep its Gradle Build Server path alive.
 
 Set `gradleKotlin.gradleForJava.integrationMode = "coexist"` if you need
 to keep Java Gradle Build Server enabled while still letting this
 extension own task discovery, or `"off"` to leave Gradle for Java untouched.
-Force eager task hydration with
-`gradleKotlin.taskDiscovery.autoHydrateOnActivation = "always"`.
-Force daemon behavior with `gradleKotlin.daemon.mode = "always"` or
-`"never"`; the default `"auto"` chooses `--no-daemon` when Gradle for Java
-is installed.
+Disable eager task hydration with
+`gradleKotlin.taskDiscovery.autoHydrateOnActivation = "never"`.
+Force no-daemon behavior with `gradleKotlin.daemon.mode = "never"`; the
+default `"auto"` uses `--daemon`.
 
 ## Sample project
 
@@ -135,11 +133,11 @@ action.
 | `gradleKotlin.versionInlayHints.checkLatest` | `true` | Query Maven Central and surface `current -> latest`. |
 | `gradleKotlin.codeLens.enabled` | `true` | Show top-of-file Reload / Dependencies lenses. |
 | `gradleKotlin.daemon.enabled` | `true` | Allow daemon usage when `gradleKotlin.daemon.mode` permits it; disable to always pass `--no-daemon`. |
-| `gradleKotlin.daemon.mode` | `auto` | Use `--no-daemon` when Gradle for Java is installed, otherwise use `--daemon`; can be forced to `always` or `never`. |
+| `gradleKotlin.daemon.mode` | `auto` | Use `--daemon` by default for shared Gradle Kotlin Companion task execution; can be forced to `never`. |
 | `gradleKotlin.initScript.enabled` | `true` | Inject an init script via `-I` for every daemon invocation. |
 | `gradleKotlin.initScriptPath` | _empty_ | Override the init script path; defaults to the bundled one. |
 | `gradleKotlin.gradleForJava.integrationMode` | `takeover` | Disable Gradle for Java task auto-detection and Java Gradle Build Server for the workspace; use `coexist` or `off` to loosen that. |
-| `gradleKotlin.taskDiscovery.autoHydrateOnActivation` | `auto` | Eagerly hydrate dynamic tasks except when Gradle for Java is installed. |
+| `gradleKotlin.taskDiscovery.autoHydrateOnActivation` | `auto` | Eagerly hydrate dynamic tasks through the shared daemon unless set to `never`. |
 
 ## Development
 

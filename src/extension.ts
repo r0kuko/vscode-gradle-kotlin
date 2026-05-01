@@ -127,7 +127,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
     context.subscriptions.push(recentView);
 
-    const daemonsProvider = new DaemonsProvider(() => {
+    const daemonsProvider = new DaemonsProvider(daemon, () => {
         const folders = vscode.workspace.workspaceFolders ?? [];
         return folders[0]?.uri.fsPath;
     });
@@ -669,12 +669,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const gradleForJavaInstalled = isGradleForJavaInstalled();
     await coordinateGradleForJava(gradleForJavaInstalled);
     await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
-    if (shouldHydrateTasksOnActivation(gradleForJavaInstalled)) {
+    if (shouldHydrateTasksOnActivation()) {
         await hydrateAllTasks(daemon, modulesProvider);
-    } else if (gradleForJavaInstalled) {
-        output.appendLine(
-            'Gradle for Java detected; skipped eager tasks --all hydration to avoid overlapping project import. Use Gradle: Refresh Modules to hydrate dynamic tasks on demand.'
-        );
     }
     refreshTestController(testController);
     void daemonsProvider.reload();
@@ -760,12 +756,12 @@ async function coordinateGradleForJava(installed: boolean): Promise<void> {
     }
 }
 
-function shouldHydrateTasksOnActivation(gradleForJavaInstalled: boolean): boolean {
+function shouldHydrateTasksOnActivation(): boolean {
     const config = vscode.workspace.getConfiguration('gradleKotlin');
     const mode = config.get<string>('taskDiscovery.autoHydrateOnActivation', 'auto');
     if (mode === 'always') return true;
     if (mode === 'never') return false;
-    return !gradleForJavaInstalled;
+    return true;
 }
 
 function moduleKey(module: GradleModule): string {

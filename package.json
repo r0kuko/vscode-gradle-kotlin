@@ -63,7 +63,7 @@
           "type": "string",
           "enum": ["auto", "always", "never"],
           "default": "auto",
-          "description": "Controls whether Gradle invocations use --daemon. 'auto' uses --no-daemon when Gradle for Java is installed, avoiding a second persistent Gradle daemon."
+          "description": "Controls whether Gradle invocations use --daemon. 'auto' reuses the Gradle daemon for all Gradle Kotlin Companion task execution."
         },
         "gradleKotlin.initScript.enabled": {
           "type": "boolean",
@@ -85,7 +85,7 @@
           "type": "string",
           "enum": ["auto", "always", "never"],
           "default": "auto",
-          "description": "Controls whether activation eagerly runs 'tasks --all' to hydrate dynamic Gradle tasks. 'auto' skips eager hydration when Gradle for Java is installed to avoid overlapping project import."
+          "description": "Controls whether activation eagerly runs 'tasks --all' through the shared daemon to hydrate dynamic Gradle tasks."
         },
         "gradleKotlin.aliases": {
           "type": "object",
@@ -572,7 +572,7 @@
       {
         "name": "gradle_run",
         "displayName": "Run Gradle Task",
-        "modelDescription": "Invoke a Gradle task in the user's workspace through Gradle Kotlin Companion's shared serialized runner. Use this instead of spawning './gradlew' through a terminal — it avoids competing invocations and automatically uses --no-daemon when Gradle for Java is installed. Supports passing the project path (e.g. ':app'), task name (e.g. 'test', 'build', 'dependencies'), and optional extra arguments. Returns the combined stdout/stderr and the exit code.",
+        "modelDescription": "Invoke a Gradle task in the user's workspace through Gradle Kotlin Companion's shared serialized runner. Use this instead of spawning './gradlew' through a terminal — it avoids competing invocations and reuses the Gradle daemon by default. Supports passing the project path (e.g. ':app'), task name (e.g. 'test', 'build', 'dependencies'), and optional extra arguments. Returns the combined stdout/stderr and the exit code.",
         "userDescription": "Lets Copilot run Gradle tasks via the shared runner.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "gradle",

@@ -25,6 +25,10 @@ export interface DaemonRunRequest {
     onOutput?: (chunk: string, source: 'stdout' | 'stderr') => void;
     /** Extra environment variables merged on top of process.env for this invocation. */
     env?: Record<string, string>;
+    /** Whether to inject the configured init script. Defaults to true. */
+    useInitScript?: boolean;
+    /** Whether to reveal the shared output channel when the invocation starts. Defaults to true. */
+    showOutput?: boolean;
     /**
      * JVM arguments for the forked Gradle worker / task JVM.  Passed as
      * `-Dorg.gradle.jvmargs=<jvmArgs>` so that, e.g., test tasks pick them up.
@@ -52,8 +56,6 @@ export interface DaemonEvent {
 }
 
 const MAX_BUFFER = 8 * 1024 * 1024;
-const GRADLE_FOR_JAVA_EXTENSION_ID = 'vscjava.vscode-gradle';
-
 export class GradleDaemon implements vscode.Disposable {
     private queue = new Map<string, Promise<unknown>>();
     private readonly output: vscode.OutputChannel;
@@ -101,7 +103,7 @@ export class GradleDaemon implements vscode.Disposable {
         const enableInitScript = config.get<boolean>('initScript.enabled', true);
         const configuredInit = (config.get<string>('initScriptPath') ?? '').trim();
         const initScript = configuredInit || defaultInitScriptPath;
-        if (enableInitScript && initScript && fs.existsSync(initScript)) {
+        if (req.useInitScript !== false && enableInitScript && initScript && fs.existsSync(initScript)) {
             args.push('-I', initScript);
         }
         if (req.jvmArgs) {
@@ -112,7 +114,9 @@ export class GradleDaemon implements vscode.Disposable {
 
         const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
         this.output.appendLine(`\n[${ ts }] > ${command} ${args.join(' ')}`);
-        this.output.show(true);
+        if (req.showOutput !== false) {
+            this.output.show(true);
+        }
         this.activeCount++;
         this._onEvent.fire({ kind: 'start', workspaceRoot: req.workspaceRoot, args: req.args });
 
@@ -244,7 +248,5 @@ function resolveDaemonFlag(config: vscode.WorkspaceConfiguration): '--daemon' | 
     const mode = config.get<string>('daemon.mode', 'auto');
     if (mode === 'always') return '--daemon';
     if (mode === 'never') return '--no-daemon';
-
-    const gradleForJavaInstalled = !!vscode.extensions.getExtension(GRADLE_FOR_JAVA_EXTENSION_ID);
-    return gradleForJavaInstalled ? '--no-daemon' : '--daemon';
+    return '--daemon';
 }

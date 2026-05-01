@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
-import { resolveGradleCommand } from './gradle';
+import type { GradleDaemon } from './daemon';
 
 export interface GradleDaemonInfo {
     pid: string;
@@ -39,7 +39,10 @@ export class DaemonsProvider implements vscode.TreeDataProvider<DaemonEntry> {
     private daemons: GradleDaemonInfo[] = [];
     private loading = false;
 
-    constructor(private readonly getWorkspaceRoot: () => string | undefined) {}
+    constructor(
+        private readonly daemon: Pick<GradleDaemon, 'run'>,
+        private readonly getWorkspaceRoot: () => string | undefined
+    ) {}
 
     /**
      * Re-run `gradlew --status` and refresh the view.
@@ -55,23 +58,13 @@ export class DaemonsProvider implements vscode.TreeDataProvider<DaemonEntry> {
                 this.daemons = [];
                 return;
             }
-            const config = vscode.workspace.getConfiguration('gradleKotlin', vscode.Uri.file(root));
-            const override = config.get<string>('gradleCommand') ?? '';
-            const { command, cwd } = resolveGradleCommand(root, override);
-
-            const out = await new Promise<string>(resolve => {
-                let buf = '';
-                const child = cp.spawn(command, ['--status'], {
-                    cwd,
-                    shell: process.platform === 'win32',
-                    env: process.env,
-                });
-                child.stdout.on('data', (b: Buffer) => (buf += b.toString()));
-                child.stderr.on('data', (b: Buffer) => (buf += b.toString()));
-                child.on('close', () => resolve(buf));
-                child.on('error', () => resolve(''));
+            const result = await this.daemon.run({
+                workspaceRoot: root,
+                args: ['--status'],
+                useInitScript: false,
+                showOutput: false,
             });
-            this.daemons = parseDaemonStatusOutput(out);
+            this.daemons = parseDaemonStatusOutput(result.combined);
         } finally {
             this.loading = false;
             this._onDidChangeTreeData.fire(undefined);

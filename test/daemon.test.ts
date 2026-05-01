@@ -82,30 +82,10 @@ describe('GradleDaemon', () => {
         await p;
     });
 
-    it('uses --no-daemon automatically when Gradle for Java is installed', async () => {
+    it('uses --daemon automatically even when Gradle for Java is installed', async () => {
         const fake = new FakeChild();
         queue.push(fake);
         vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue({ id: 'vscjava.vscode-gradle' } as never);
-
-        const daemon = new GradleDaemon(makeChannel());
-        const p = daemon.run({ workspaceRoot: '/ws', args: [':help'] });
-        await Promise.resolve();
-
-        const args = spawnMock.mock.calls[0][1] as string[];
-        expect(args).toContain('--no-daemon');
-        expect(args).not.toContain('--daemon');
-
-        fake.emit('close', 0);
-        await p;
-    });
-
-    it('can force --daemon even when Gradle for Java is installed', async () => {
-        const fake = new FakeChild();
-        queue.push(fake);
-        vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue({ id: 'vscjava.vscode-gradle' } as never);
-        vi.spyOn(vscode.workspace, 'getConfiguration').mockReturnValue({
-            get: <T>(key: string, defaultValue?: T) => key === 'daemon.mode' ? 'always' as T : defaultValue,
-        } as unknown as vscode.WorkspaceConfiguration);
 
         const daemon = new GradleDaemon(makeChannel());
         const p = daemon.run({ workspaceRoot: '/ws', args: [':help'] });
@@ -114,6 +94,25 @@ describe('GradleDaemon', () => {
         const args = spawnMock.mock.calls[0][1] as string[];
         expect(args).toContain('--daemon');
         expect(args).not.toContain('--no-daemon');
+
+        fake.emit('close', 0);
+        await p;
+    });
+
+    it('can force --no-daemon', async () => {
+        const fake = new FakeChild();
+        queue.push(fake);
+        vi.spyOn(vscode.workspace, 'getConfiguration').mockReturnValue({
+            get: <T>(key: string, defaultValue?: T) => key === 'daemon.mode' ? 'never' as T : defaultValue,
+        } as unknown as vscode.WorkspaceConfiguration);
+
+        const daemon = new GradleDaemon(makeChannel());
+        const p = daemon.run({ workspaceRoot: '/ws', args: [':help'] });
+        await Promise.resolve();
+
+        const args = spawnMock.mock.calls[0][1] as string[];
+        expect(args).toContain('--no-daemon');
+        expect(args).not.toContain('--daemon');
 
         fake.emit('close', 0);
         await p;
@@ -142,6 +141,36 @@ describe('GradleDaemon', () => {
         fake.emit('close', 0);
         await p;
         configSpy.mockRestore();
+        fs.unlinkSync(initScript);
+    });
+
+    it('can suppress init script injection and output reveal for internal calls', async () => {
+        const fake = new FakeChild();
+        queue.push(fake);
+
+        const initScript = path.join(os.tmpdir(), `gradle-kotlin-${Date.now()}.init.gradle.kts`);
+        fs.writeFileSync(initScript, '// test init script\n', 'utf8');
+        setDefaultInitScriptPath(initScript);
+        vi.spyOn(vscode.workspace, 'getConfiguration').mockReturnValue({
+            get: <T>(_k: string, d?: T) => d,
+        } as unknown as vscode.WorkspaceConfiguration);
+        const channel = makeChannel();
+
+        const daemon = new GradleDaemon(channel);
+        const p = daemon.run({
+            workspaceRoot: '/ws',
+            args: ['--status'],
+            useInitScript: false,
+            showOutput: false,
+        });
+        await Promise.resolve();
+        const args = spawnMock.mock.calls[0][1] as string[];
+        expect(args).not.toContain('-I');
+        expect(args).not.toContain(initScript);
+        expect(channel.show).not.toHaveBeenCalled();
+
+        fake.emit('close', 0);
+        await p;
         fs.unlinkSync(initScript);
     });
 
