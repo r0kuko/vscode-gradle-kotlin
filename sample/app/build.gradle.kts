@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.ksp)
     application
 }
 
@@ -11,6 +12,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.bundles.ktor.client)
     implementation(libs.guava)
+
+    ksp(project(":ksp-processor"))
 
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotlinx.coroutines.test)

@@ -1,5 +1,6 @@
 [versions]
 kotlin = "2.0.21"
+ksp = "2.0.21-1.0.28"
 coroutines = "1.9.0"
 junit = "5.11.3"
 ktor = "3.0.1"
@@ -13,9 +14,11 @@ ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
 junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junit" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version = "1.11.3" }
+ksp-symbol-processing-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 
 [bundles]
 ktor-client = ["ktor-client-core", "ktor-client-cio"]
