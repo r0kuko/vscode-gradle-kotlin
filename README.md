@@ -55,10 +55,13 @@ official `gradle-java` extension.
 - All UI-initiated runs show a cancellable notification — pressing the
   ✕ SIGTERMs the underlying gradle child.
 
-### Long-lived Gradle daemon, exposed to Copilot
-The extension keeps a single daemon shared by every command and exposes
-four Language-Model tools so Copilot can drive Gradle without spawning
-its own JVMs:
+### Shared Gradle runner, exposed to Copilot
+The extension serializes Gradle invocations per workspace and exposes
+Language-Model tools so Copilot can drive Gradle without spawning
+competing terminal builds. Failed Gradle runs return structured JSON with
+the exit code, failed task, parsed diagnostics when available, and the
+tail of stdout / stderr so the model can diagnose failures without
+hanging on a terminal.
 
 | Tool reference | Purpose |
 | --- | --- |
@@ -66,11 +69,38 @@ its own JVMs:
 | `#gradleTasks` (`gradle_tasks`) | Bulleted list of tasks under a project path. |
 | `#gradleDependencies` (`gradle_dependencies`) | Dependency tree for a project path. |
 | `#libsCatalog` (`libs_catalog_read`) | Parsed `libs.versions.toml` as JSON. |
+| `#gradleDependencySearch` (`gradle_dependency_search`) | Maven Central dependency coordinates with latest versions. |
 
 An init script (`resources/gradle-kotlin.init.gradle.kts`) is injected
 via `-I` for every invocation; disable with
 `gradleKotlin.initScript.enabled = false` or point to your own with
 `gradleKotlin.initScriptPath`.
+
+### Gradle for Java takeover
+Gradle for Java starts its own Gradle task discovery and can also wire a
+Java Gradle Build Server into Java project import. Gradle Kotlin
+Companion treats that extension as something to take over by default,
+using only public VS Code settings so the behavior is explicit and
+reversible:
+
+- uses `--no-daemon` by default for its own Gradle invocations, avoiding
+  a second persistent Gradle daemon in memory;
+- sets workspace `gradle.autoDetect = off`, so Gradle for Java does not
+  also auto-discover Gradle tasks;
+- sets workspace `java.gradle.buildServer.enabled = off`, so Gradle for
+  Java does not keep its Gradle Build Server path alive;
+- skips eager `tasks --all` hydration on activation, avoiding overlap
+  with Gradle for Java project import. Use **Gradle: Refresh Modules** to
+  hydrate dynamic tasks on demand.
+
+Set `gradleKotlin.gradleForJava.integrationMode = "coexist"` if you need
+to keep Java Gradle Build Server enabled while still letting this
+extension own task discovery, or `"off"` to leave Gradle for Java untouched.
+Force eager task hydration with
+`gradleKotlin.taskDiscovery.autoHydrateOnActivation = "always"`.
+Force daemon behavior with `gradleKotlin.daemon.mode = "always"` or
+`"never"`; the default `"auto"` chooses `--no-daemon` when Gradle for Java
+is installed.
 
 ## Sample project
 
@@ -104,9 +134,12 @@ action.
 | `gradleKotlin.versionInlayHints.enabled` | `true` | Show ghost-text versions next to `libs.*`. |
 | `gradleKotlin.versionInlayHints.checkLatest` | `true` | Query Maven Central and surface `current -> latest`. |
 | `gradleKotlin.codeLens.enabled` | `true` | Show top-of-file Reload / Dependencies lenses. |
-| `gradleKotlin.daemon.enabled` | `true` | Keep a long-lived Gradle daemon for Copilot tool calls. |
+| `gradleKotlin.daemon.enabled` | `true` | Allow daemon usage when `gradleKotlin.daemon.mode` permits it; disable to always pass `--no-daemon`. |
+| `gradleKotlin.daemon.mode` | `auto` | Use `--no-daemon` when Gradle for Java is installed, otherwise use `--daemon`; can be forced to `always` or `never`. |
 | `gradleKotlin.initScript.enabled` | `true` | Inject an init script via `-I` for every daemon invocation. |
 | `gradleKotlin.initScriptPath` | _empty_ | Override the init script path; defaults to the bundled one. |
+| `gradleKotlin.gradleForJava.integrationMode` | `takeover` | Disable Gradle for Java task auto-detection and Java Gradle Build Server for the workspace; use `coexist` or `off` to loosen that. |
+| `gradleKotlin.taskDiscovery.autoHydrateOnActivation` | `auto` | Eagerly hydrate dynamic tasks except when Gradle for Java is installed. |
 
 ## Development
 
