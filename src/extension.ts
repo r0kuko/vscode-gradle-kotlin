@@ -326,8 +326,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('gradleKotlin.stopDaemon', async () => {
             const folder = pickWorkspaceFolder();
             if (folder) {
-                await daemon.stopAll(folder.uri.fsPath);
-                await daemonsProvider.reload();
+                await daemonsProvider.stopAllDaemons(folder.uri.fsPath);
             }
         }),
         vscode.commands.registerCommand('gradleKotlin.pinTask', async (target: ModuleTreeItemData | GradleTask | undefined) => {
@@ -455,8 +454,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 'Stop All'
             );
             if (choice !== 'Stop All') return;
-            await daemon.stopAll(folder.uri.fsPath);
-            await daemonsProvider.reload();
+            await daemonsProvider.stopAllDaemons(folder.uri.fsPath);
         }),
 
         // Feature 1: Cancel a running task from the sidebar tree.

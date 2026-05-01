@@ -32,6 +32,10 @@ export function parseDaemonStatusOutput(output: string): GradleDaemonInfo[] {
 
 type DaemonEntry = GradleDaemonInfo | 'loading' | 'empty';
 
+function isAliveDaemon(info: GradleDaemonInfo): boolean {
+    return info.status === 'IDLE' || info.status === 'BUSY';
+}
+
 export class DaemonsProvider implements vscode.TreeDataProvider<DaemonEntry> {
     private readonly _onDidChangeTreeData = new vscode.EventEmitter<DaemonEntry | undefined>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
@@ -40,7 +44,7 @@ export class DaemonsProvider implements vscode.TreeDataProvider<DaemonEntry> {
     private loading = false;
 
     constructor(
-        private readonly daemon: Pick<GradleDaemon, 'run'>,
+        private readonly daemon: Pick<GradleDaemon, 'run' | 'stopAll'>,
         private readonly getWorkspaceRoot: () => string | undefined
     ) {}
 
@@ -63,6 +67,8 @@ export class DaemonsProvider implements vscode.TreeDataProvider<DaemonEntry> {
                 args: ['--status'],
                 useInitScript: false,
                 showOutput: false,
+                queue: false,
+                appendDaemonFlag: false,
             });
             this.daemons = parseDaemonStatusOutput(result.combined);
         } finally {
@@ -115,27 +121,46 @@ export class DaemonsProvider implements vscode.TreeDataProvider<DaemonEntry> {
     }
 
     getChildren(): DaemonEntry[] {
+        const alive = this.daemons.filter(isAliveDaemon);
         if (this.loading) return ['loading'];
-        if (this.daemons.length === 0) return ['empty'];
-        return this.daemons;
+        if (alive.length === 0) return ['empty'];
+        return alive;
     }
 
     /**
      * Kill a specific daemon process by PID.
      * On Unix: SIGTERM. On Windows: taskkill.
      */
-    async stopDaemon(info: GradleDaemonInfo): Promise<void> {
+    async stopDaemon(info: GradleDaemonInfo, reload = true): Promise<void> {
         try {
             const pid = parseInt(info.pid, 10);
             if (process.platform === 'win32') {
                 await new Promise<void>(resolve =>
-                    cp.exec(`taskkill /PID ${pid} /F`, () => resolve())
+                    cp.exec(`taskkill /PID ${pid} /T /F`, () => resolve())
                 );
             } else {
-                process.kill(pid, 'SIGTERM');
+                process.kill(pid, 'SIGKILL');
             }
         } catch {
             // already dead, ignore
+        }
+        if (reload) {
+            await this.reload();
+        }
+    }
+
+    /**
+     * Stop Gradle daemons even when one is stuck BUSY: first ask Gradle to stop
+     * politely, then force-kill any still-alive PIDs reported by --status.
+     */
+    async stopAllDaemons(workspaceRoot?: string): Promise<void> {
+        const root = workspaceRoot ?? this.getWorkspaceRoot();
+        if (!root) return;
+        await this.daemon.stopAll(root);
+        await this.reload();
+        const stillAlive = this.daemons.filter(isAliveDaemon);
+        for (const info of stillAlive) {
+            await this.stopDaemon(info, false);
         }
         await this.reload();
     }

@@ -162,16 +162,42 @@ describe('GradleDaemon', () => {
             args: ['--status'],
             useInitScript: false,
             showOutput: false,
+            queue: false,
+            appendDaemonFlag: false,
         });
         await Promise.resolve();
         const args = spawnMock.mock.calls[0][1] as string[];
         expect(args).not.toContain('-I');
         expect(args).not.toContain(initScript);
+        expect(args).not.toContain('--daemon');
+        expect(args).not.toContain('--no-daemon');
         expect(channel.show).not.toHaveBeenCalled();
 
         fake.emit('close', 0);
         await p;
         fs.unlinkSync(initScript);
+    });
+
+    it('runs stopAll immediately instead of waiting behind queued task executions', async () => {
+        const task = new FakeChild();
+        const stop = new FakeChild();
+        queue.push(task, stop);
+
+        const daemon = new GradleDaemon(makeChannel());
+        const taskRun = daemon.run({ workspaceRoot: '/ws', args: [':longTask'] });
+        await Promise.resolve();
+        expect(spawnMock).toHaveBeenCalledTimes(1);
+
+        const stopRun = daemon.stopAll('/ws');
+        await Promise.resolve();
+        expect(spawnMock).toHaveBeenCalledTimes(2);
+        const stopArgs = spawnMock.mock.calls[1][1] as string[];
+        expect(stopArgs).toEqual(['--stop', '--console=plain']);
+
+        stop.emit('close', 0);
+        await stopRun;
+        task.emit('close', 0);
+        await taskRun;
     });
 
     it('settles when the child exits but close is not observed', async () => {

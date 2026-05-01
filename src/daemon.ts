@@ -29,6 +29,10 @@ export interface DaemonRunRequest {
     useInitScript?: boolean;
     /** Whether to reveal the shared output channel when the invocation starts. Defaults to true. */
     showOutput?: boolean;
+    /** Whether this invocation should wait behind task executions in the workspace queue. Defaults to true. */
+    queue?: boolean;
+    /** Whether to append --daemon/--no-daemon. Defaults to true for task executions. */
+    appendDaemonFlag?: boolean;
     /**
      * JVM arguments for the forked Gradle worker / task JVM.  Passed as
      * `-Dorg.gradle.jvmargs=<jvmArgs>` so that, e.g., test tasks pick them up.
@@ -84,6 +88,9 @@ export class GradleDaemon implements vscode.Disposable {
         if (this.disposed) {
             throw new Error('Gradle daemon is disposed.');
         }
+        if (req.queue === false) {
+            return this.runImmediate(req);
+        }
         const key = req.workspaceRoot;
         const previous = this.queue.get(key) ?? Promise.resolve();
         const next = previous.then(() => this.runImmediate(req));
@@ -109,7 +116,10 @@ export class GradleDaemon implements vscode.Disposable {
         if (req.jvmArgs) {
             args.push(`-Dorg.gradle.jvmargs=${req.jvmArgs}`);
         }
-        args.push(resolveDaemonFlag(config), '--console=plain');
+        if (req.appendDaemonFlag !== false) {
+            args.push(resolveDaemonFlag(config));
+        }
+        args.push('--console=plain');
         const start = Date.now();
 
         const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -207,7 +217,13 @@ export class GradleDaemon implements vscode.Disposable {
      * Ask Gradle to politely stop its daemons. Best-effort.
      */
     async stopAll(workspaceRoot: string): Promise<void> {
-        await this.run({ workspaceRoot, args: ['--stop'] }).catch(() => undefined);
+        await this.run({
+            workspaceRoot,
+            args: ['--stop'],
+            useInitScript: false,
+            queue: false,
+            appendDaemonFlag: false,
+        }).catch(() => undefined);
     }
 
     dispose(): void {
