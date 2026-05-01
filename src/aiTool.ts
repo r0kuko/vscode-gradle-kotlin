@@ -6,6 +6,7 @@ import { qualifyTask, parseTasksAllOutput } from './tasks';
 import { findCatalogFile, parseCatalogFile } from './libs';
 import { searchArtifacts } from './mavenSearch';
 import { parseGradleDiagnostics } from './buildDiagnostics';
+import { RecentRun } from './history';
 
 /**
  * Input schema declared in package.json under `languageModelTools`.
@@ -74,7 +75,8 @@ export class GradleDependencySearchTool
 export class GradleRunTool implements vscode.LanguageModelTool<GradleRunToolInput> {
     constructor(
         private readonly daemon: GradleDaemon,
-        private readonly resolveDefaultWorkspace: () => GradleModule[]
+        private readonly resolveDefaultWorkspace: () => GradleModule[],
+        private readonly recordRun?: (run: RecentRun) => Promise<void>
     ) {}
 
     async prepareInvocation(
@@ -109,6 +111,15 @@ export class GradleRunTool implements vscode.LanguageModelTool<GradleRunToolInpu
         const args = [fullTask, ...(options.input.args ?? [])];
 
         const result = await this.daemon.run({ workspaceRoot, args, token });
+        await this.recordRun?.({
+            task: fullTask,
+            args: options.input.args ?? [],
+            workspaceRoot,
+            timestamp: Date.now(),
+            exitCode: result.exitCode,
+            durationMs: result.durationMs,
+            source: 'ai',
+        });
 
         return toolResult(buildRunPayload(fullTask, result));
     }
@@ -170,7 +181,8 @@ export class GradleDependenciesTool
 {
     constructor(
         private readonly daemon: GradleDaemon,
-        private readonly resolveDefaultWorkspace: () => GradleModule[]
+        private readonly resolveDefaultWorkspace: () => GradleModule[],
+        private readonly recordRun?: (run: RecentRun) => Promise<void>
     ) {}
 
     async prepareInvocation(
@@ -196,8 +208,18 @@ export class GradleDependenciesTool
         if (modules.length === 0) return noWorkspaceResult();
         const workspaceRoot = modules[0].workspaceRoot;
         const projectPath = options.input.projectPath ?? ':';
-        const args = [qualifyTask(projectPath, 'dependencies'), ...(options.input.args ?? [])];
+        const task = qualifyTask(projectPath, 'dependencies');
+        const args = [task, ...(options.input.args ?? [])];
         const result = await this.daemon.run({ workspaceRoot, args, token });
+        await this.recordRun?.({
+            task,
+            args: options.input.args ?? [],
+            workspaceRoot,
+            timestamp: Date.now(),
+            exitCode: result.exitCode,
+            durationMs: result.durationMs,
+            source: 'ai',
+        });
         return toolResult(buildRunPayload(args.join(' '), result));
     }
 }
@@ -333,16 +355,17 @@ function toolResult(payload: unknown): vscode.LanguageModelToolResult {
 export function registerGradleRunTool(
     context: vscode.ExtensionContext,
     daemon: GradleDaemon,
-    modulesProvider: () => GradleModule[]
+    modulesProvider: () => GradleModule[],
+    recordRun?: (run: RecentRun) => Promise<void>
 ): void {
     const lm = (vscode as unknown as { lm?: { registerTool?: typeof vscode.lm.registerTool } }).lm;
     if (!lm?.registerTool) return;
     context.subscriptions.push(
-        lm.registerTool('gradle_run', new GradleRunTool(daemon, modulesProvider)),
+        lm.registerTool('gradle_run', new GradleRunTool(daemon, modulesProvider, recordRun)),
         lm.registerTool('gradle_tasks', new GradleTasksTool(daemon, modulesProvider)),
         lm.registerTool(
             'gradle_dependencies',
-            new GradleDependenciesTool(daemon, modulesProvider)
+            new GradleDependenciesTool(daemon, modulesProvider, recordRun)
         ),
         lm.registerTool('libs_catalog_read', new LibsCatalogReadTool(modulesProvider)),
         lm.registerTool('gradle_dependency_search', new GradleDependencySearchTool())

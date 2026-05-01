@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { GradleCodeLensProvider } from '../src/codelens';
 import { LibsCompletionProvider } from '../src/completion';
 import { parseCatalog } from '../src/libs';
-import { GradleModulesProvider } from '../src/treeProvider';
+import { GradleModulesProvider, RecentTasksProvider } from '../src/treeProvider';
 import * as vscode from 'vscode';
 
 const SAMPLE_BUILD = [
@@ -137,5 +137,29 @@ describe('GradleModulesProvider multi-root', () => {
         expect(provider.getChildren(undefined).length).toBe(2);
         provider.clear();
         expect(provider.getChildren(undefined).length).toBe(0);
+    });
+});
+
+describe('RecentTasksProvider', () => {
+    it('marks AI tool runs in the recent task row', () => {
+        const provider = new RecentTasksProvider();
+        provider.setRecent([
+            {
+                task: ':app:test',
+                args: ['--info'],
+                workspaceRoot: '/ws',
+                timestamp: 0,
+                exitCode: 0,
+                durationMs: 10,
+                source: 'ai',
+            },
+        ]);
+
+        const item = provider.getTreeItem(provider.getChildren()[0]);
+
+        expect(item.label).toBe(':app:test --info');
+        expect(item.description).toContain('AI');
+        expect((item.iconPath as vscode.ThemeIcon).id).toBe('sparkle');
+        expect(String(item.tooltip)).toContain('AI tool');
     });
 });

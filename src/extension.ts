@@ -662,7 +662,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const out: GradleModule[] = [];
         for (const ws of workspaces.values()) out.push(...ws.modules);
         return out;
-    });
+    }, recordRun);
 
     const gradleForJavaInstalled = isGradleForJavaInstalled();
     await coordinateGradleForJava(gradleForJavaInstalled);

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { buildRunPayload } from '../src/aiTool';
+import { describe, it, expect, vi } from 'vitest';
+import { GradleDependenciesTool, GradleRunTool, buildRunPayload } from '../src/aiTool';
 
 describe('buildRunPayload', () => {
     it('returns full output when under the cap', () => {
@@ -53,5 +53,72 @@ describe('buildRunPayload', () => {
                 message: '[ksp] Illegal type "UserAccount", it is decorated by "@org.babyfish.jimmer.sql.Entity" but there is no id property',
             },
         ]);
+    });
+});
+
+describe('AI Gradle tools recent history', () => {
+    const module = {
+        rootPath: '/ws',
+        workspaceRoot: '/ws',
+        projectPath: ':',
+        name: 'root',
+        kotlinDsl: true,
+    };
+
+    it('records gradle_run invocations as AI recent runs', async () => {
+        const daemon = {
+            run: vi.fn(async () => ({
+                exitCode: 0,
+                stdout: '',
+                stderr: '',
+                combined: 'BUILD SUCCESSFUL',
+                durationMs: 25,
+            })),
+        };
+        const recordRun = vi.fn(async () => undefined);
+        const tool = new GradleRunTool(daemon as never, () => [module as never], recordRun);
+
+        await tool.invoke({ input: { task: 'test', projectPath: ':app', args: ['--info'] } } as never, {} as never);
+
+        expect(daemon.run).toHaveBeenCalledWith({
+            workspaceRoot: '/ws',
+            args: [':app:test', '--info'],
+            token: {},
+        });
+        expect(recordRun).toHaveBeenCalledWith({
+            task: ':app:test',
+            args: ['--info'],
+            workspaceRoot: '/ws',
+            timestamp: expect.any(Number),
+            exitCode: 0,
+            durationMs: 25,
+            source: 'ai',
+        });
+    });
+
+    it('records gradle_dependencies invocations as AI recent runs', async () => {
+        const daemon = {
+            run: vi.fn(async () => ({
+                exitCode: 1,
+                stdout: '',
+                stderr: '',
+                combined: 'dependency failure',
+                durationMs: 40,
+            })),
+        };
+        const recordRun = vi.fn(async () => undefined);
+        const tool = new GradleDependenciesTool(daemon as never, () => [module as never], recordRun);
+
+        await tool.invoke({ input: { projectPath: ':app', args: ['--configuration', 'runtimeClasspath'] } } as never, {} as never);
+
+        expect(recordRun).toHaveBeenCalledWith({
+            task: ':app:dependencies',
+            args: ['--configuration', 'runtimeClasspath'],
+            workspaceRoot: '/ws',
+            timestamp: expect.any(Number),
+            exitCode: 1,
+            durationMs: 40,
+            source: 'ai',
+        });
     });
 });

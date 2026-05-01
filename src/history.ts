@@ -15,6 +15,8 @@ export interface RecentRun {
     exitCode?: number | null;
     /** Last duration in ms, if known. */
     durationMs?: number;
+    /** Where this run came from. Missing means a normal user-initiated run for older persisted history. */
+    source?: 'user' | 'ai';
 }
 
 export const HISTORY_LIMIT = 20;

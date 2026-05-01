@@ -393,10 +393,11 @@ export class RecentTasksProvider implements vscode.TreeDataProvider<RecentRun | 
             recentLabel(element),
             vscode.TreeItemCollapsibleState.None
         );
-        item.description = new Date(element.timestamp).toLocaleTimeString();
-        item.tooltip = `${recentLabel(element)}\nlast exit: ${element.exitCode ?? '?'}`;
+        const time = new Date(element.timestamp).toLocaleTimeString();
+        item.description = element.source === 'ai' ? `AI · ${time}` : time;
+        item.tooltip = `${recentLabel(element)}\nsource: ${element.source === 'ai' ? 'AI tool' : 'user'}\nlast exit: ${element.exitCode ?? '?'}`;
         item.contextValue = 'gradleRecentRun';
-        item.iconPath = new vscode.ThemeIcon('debug-rerun');
+        item.iconPath = new vscode.ThemeIcon(element.source === 'ai' ? 'sparkle' : 'debug-rerun');
         item.command = {
             command: 'gradleKotlin.rerunRecent',
             title: 'Re-run',
