@@ -5,6 +5,7 @@ import { GradleModule } from './gradle';
 import { qualifyTask, parseTasksAllOutput } from './tasks';
 import { findCatalogFile, parseCatalogFile } from './libs';
 import { searchArtifacts } from './mavenSearch';
+import { parseGradleDiagnostics } from './buildDiagnostics';
 
 /**
  * Input schema declared in package.json under `languageModelTools`.
@@ -280,18 +281,40 @@ export function buildRunPayload(
     invocation: string;
     exitCode: number | null;
     durationMs: number;
+    failed: boolean;
+    failedTask?: string;
     truncated: boolean;
     bytes: number;
     tail: string;
+    diagnostics: Array<{
+        file: string;
+        line: number;
+        column: number;
+        severity: 'error' | 'warning';
+        message: string;
+    }>;
 } {
     const truncated = result.combined.length > MAX_TAIL_BYTES;
+    const failedTask = /^> Task (.+?) FAILED$/m.exec(result.combined)?.[1];
+    const diagnostics = parseGradleDiagnostics(result.combined)
+        .slice(0, 20)
+        .map(d => ({
+            file: d.file,
+            line: d.line + 1,
+            column: d.column + 1,
+            severity: d.severity,
+            message: d.message,
+        }));
     return {
         invocation,
         exitCode: result.exitCode,
         durationMs: result.durationMs,
+        failed: result.exitCode !== 0 && result.exitCode !== null,
+        ...(failedTask ? { failedTask } : {}),
         truncated,
         bytes: result.combined.length,
         tail: truncated ? result.combined.slice(-MAX_TAIL_BYTES) : result.combined,
+        diagnostics,
     };
 }
 

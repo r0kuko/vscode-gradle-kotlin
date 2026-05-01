@@ -103,6 +103,21 @@ Build file '/ws/app/build.gradle.kts' line: 7
         expect(out).toHaveLength(1);
         expect(out[0].message).toBe('error from URI');
     });
+
+    it('extracts KSP processor errors with file and line references', () => {
+        const out = parseGradleDiagnostics(
+            'e: [ksp] C:/Users/Administrator/srv/cloudstack-server/modules/user/src/main/kotlin/ink/cloudstack/server/user/entity/UserAccount.kt:21: Illegal type "ink.cloudstack.server.user.entity.UserAccount", it is decorated by "@org.babyfish.jimmer.sql.Entity" but there is no id property\n'
+        );
+        expect(out).toEqual([
+            {
+                file: 'C:/Users/Administrator/srv/cloudstack-server/modules/user/src/main/kotlin/ink/cloudstack/server/user/entity/UserAccount.kt',
+                line: 20,
+                column: 0,
+                severity: 'error',
+                message: '[ksp] Illegal type "ink.cloudstack.server.user.entity.UserAccount", it is decorated by "@org.babyfish.jimmer.sql.Entity" but there is no id property',
+            },
+        ]);
+    });
 });
 
 describe('normalizeFilePath', () => {

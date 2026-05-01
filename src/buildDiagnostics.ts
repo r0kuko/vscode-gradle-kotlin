@@ -17,6 +17,9 @@
  *     e: /abs/File.kt: (42, 7): Unresolved reference: foo
  *     w: /abs/File.kt: (42, 7): Variable 'x' is never used
  *
+ *   KSP processors:
+ *     e: [ksp] C:/abs/File.kt:21: Illegal type "Foo"
+ *
  * Output is grouped by file so callers can populate a single
  * `vscode.DiagnosticCollection` per build.
  */
@@ -64,6 +67,8 @@ const KOTLIN_URI_RE = /\b([ew]):\s+file:\/\/([^\s:]+):(\d+):(\d+):?\s+(.+)/g;
 // Legacy Kotlin 1.x: `e: /abs/path: (line, col): message`
 const KOTLIN_PATH_RE = /\b([ew]):\s+((?:[A-Za-z]:[\\/]|\/)\S+\.(kt|kts)):\s*\((\d+),\s*(\d+)\):?\s+(.+)/g;
 
+const KSP_RE = /\b([ew]):\s+\[ksp]\s+((?:[A-Za-z]:[\\/]|\/)\S+\.(?:kt|kts)):(\d+)(?::(\d+))?:\s+(.+)/g;
+
 const WHERE_RE = /\*\s+Where:\s+(?:Build file|Settings file|Script)\s+'([^']+)'\s+line:\s+(\d+)/g;
 const WHAT_RE = /\*\s+What went wrong:\s*(.+)/;
 
@@ -101,6 +106,21 @@ export function parseGradleDiagnostics(combined: string): GradleDiagnostic[] {
             column: colIdx,
             severity: sev === 'e' ? 'error' : 'warning',
             message: msg.trim(),
+        });
+    }
+
+    KSP_RE.lastIndex = 0;
+    while ((m = KSP_RE.exec(combined)) !== null) {
+        const [, sev, file, line, col, msg] = m;
+        const lineIdx = Math.max(0, parseInt(line, 10) - 1);
+        const colIdx = col ? Math.max(0, parseInt(col, 10) - 1) : 0;
+        if (out.some(d => d.file === file && d.line === lineIdx && d.message === msg.trim())) continue;
+        out.push({
+            file,
+            line: lineIdx,
+            column: colIdx,
+            severity: sev === 'e' ? 'error' : 'warning',
+            message: `[ksp] ${msg.trim()}`,
         });
     }
 
