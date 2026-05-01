@@ -1,6 +1,9 @@
 /**
- * Generate the extension icon by rasterising the JetBrains-supplied
- * "Kotlin Gradle Script (dark)" SVG to a 256×256 PNG.
+ * Generate the extension icon (images/icon.png).
+ *
+ * Layout:
+ *   - black circular tile (full canvas),
+ *   - JetBrains Kotlin Gradle Script dark glyph centred at ~58% of the canvas.
  *
  * Usage:
  *   node scripts/generate_icon.js
@@ -19,6 +22,7 @@ const ICONS_DIR = path.join(OUT_DIR, 'icons');
 const CACHE_DIR = path.resolve(__dirname, '.cache');
 const OUT_FILE = path.join(OUT_DIR, 'icon.png');
 const SIZE = 256;
+const GLYPH_RATIO = 0.58;
 
 const SVGS = [
     {
@@ -89,9 +93,27 @@ async function main() {
 
     const sourceSvg = path.join(ICONS_DIR, 'kotlinGradleScript_dark.svg');
 
-    await sharp(sourceSvg, { density: 384 })
-        .resize(SIZE, SIZE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    const tileSvg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">
+  <circle cx="${SIZE / 2}" cy="${SIZE / 2}" r="${SIZE / 2}" fill="#1B1B1F"/>
+</svg>`;
+    const tile = await sharp(Buffer.from(tileSvg)).png().toBuffer();
+
+    const glyphSize = Math.round(SIZE * GLYPH_RATIO);
+    const glyphTrimmed = await sharp(sourceSvg, { density: 1024 })
+        .trim()
         .png()
+        .toBuffer();
+    const glyph = await sharp(glyphTrimmed)
+        .resize(glyphSize, glyphSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toBuffer();
+    const glyphLeft = Math.round((SIZE - glyphSize) / 2);
+    const glyphTop = Math.round((SIZE - glyphSize) / 2);
+
+    await sharp(tile)
+        .composite([{ input: glyph, left: glyphLeft, top: glyphTop }])
+        .png({ compressionLevel: 9 })
         .toFile(OUT_FILE);
 
     console.log(`✓ Wrote ${path.relative(process.cwd(), OUT_FILE)} (${SIZE}x${SIZE})`);
