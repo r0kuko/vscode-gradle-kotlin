@@ -157,6 +157,24 @@
         "category": "Gradle Kotlin"
       },
       {
+        "command": "gradleKotlin.installKotlinLsp",
+        "title": "Kotlin LSP: Install Server",
+        "category": "Gradle Kotlin",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "gradleKotlin.uninstallKotlinLsp",
+        "title": "Kotlin LSP: Uninstall Server",
+        "category": "Gradle Kotlin",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gradleKotlin.updateKotlinLsp",
+        "title": "Kotlin LSP: Update Server",
+        "category": "Gradle Kotlin",
+        "icon": "$(arrow-up)"
+      },
+      {
         "command": "gradleKotlin.runTask",
         "title": "Gradle: Run Task",
         "category": "Gradle Kotlin",
@@ -317,6 +335,15 @@
         {
           "command": "gradleKotlin.upgradeWrapper",
           "when": "gradleKotlin.isGradleProject"
+        },
+        {
+          "command": "gradleKotlin.installKotlinLsp"
+        },
+        {
+          "command": "gradleKotlin.uninstallKotlinLsp"
+        },
+        {
+          "command": "gradleKotlin.updateKotlinLsp"
         },
         {
           "command": "gradleKotlin.runTask",

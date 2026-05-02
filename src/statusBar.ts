@@ -82,3 +82,11 @@ export function createWrapperUpgradeItem(): vscode.StatusBarItem {
     item.hide();
     return item;
 }
+
+export function createKotlinLspUpgradeItem(): vscode.StatusBarItem {
+    const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 48);
+    item.command = 'gradleKotlin.updateKotlinLsp';
+    item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    item.hide();
+    return item;
+}
