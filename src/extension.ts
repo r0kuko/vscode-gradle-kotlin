@@ -1100,6 +1100,7 @@ async function checkWrapperUpgradeBadge(item: vscode.StatusBarItem): Promise<voi
             if (parsed && compareVersions(latest, parsed.version) > 0) {
                 item.text = `$(arrow-up) Gradle ${parsed.version} → ${latest}`;
                 item.tooltip = `A newer Gradle is available. Click to upgrade to ${latest}.`;
+                item.command = { command: 'gradleKotlin.upgradeWrapper', title: 'Upgrade Gradle Wrapper', arguments: [files[0]] };
                 item.show();
                 return; // show once for the first outdated workspace
             }
