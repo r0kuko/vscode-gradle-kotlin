@@ -2,7 +2,7 @@
   "name": "vscode-gradle-kotlin",
   "displayName": "Gradle Kotlin Companion",
   "description": "JetBrains-style Gradle/Kotlin DSL experience for VS Code: module tree, run tasks, reload-project actions, libs.versions.toml inlay hints & completion, and a shared Gradle execution path exposed as a Copilot tool.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "r0kuko",
   "license": "MIT",
   "engines": {
