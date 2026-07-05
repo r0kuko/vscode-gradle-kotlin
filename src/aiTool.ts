@@ -342,9 +342,7 @@ export function buildRunPayload(
 
 function toolResult(payload: unknown): vscode.LanguageModelToolResult {
     return new vscode.LanguageModelToolResult([
-        new vscode.LanguageModelTextPart(
-            '```json\n' + JSON.stringify(payload, null, 2) + '\n```'
-        ),
+        new vscode.LanguageModelTextPart(JSON.stringify(payload, null, 2)),
     ]);
 }
 

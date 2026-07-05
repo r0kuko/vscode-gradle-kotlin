@@ -30,7 +30,7 @@ import {
 } from './propertiesProvider';
 import { findDuplicateDependencies, findUnusedPlugins } from './extraDiagnostics';
 import { disposeDaemon, getDaemon, setDefaultInitScriptPath } from './daemon';
-import { createDaemonStatusItem, createKotlinLspUpgradeItem, createWrapperUpgradeItem } from './statusBar';
+import { createDaemonStatusItem, createWrapperUpgradeItem } from './statusBar';
 import { createTestController } from './testController';
 import { registerGradleRunTool } from './aiTool';
 import { RecentRun, pushRecent } from './history';
@@ -46,18 +46,6 @@ import {
     rewriteDistributionUrl,
 } from './wrapper';
 import { extractBuildScanUrls } from './buildScan';
-import {
-    KOTLIN_LSP_EXTENSION_ID,
-    KOTLIN_LSP_FALLBACK_RELEASE,
-    KotlinLspPlatform,
-    KotlinLspRelease,
-    defaultKotlinLspPlatform,
-    findKotlinLspVsixUrl,
-    kotlinLspPlatformLabel,
-    kotlinLspReleaseUrl,
-    kotlinLspVsixUrl,
-    parseKotlinLspReleases,
-} from './kotlinLsp';
 
 const PINNED_KEY = 'gradleKotlin.pinnedTasks';
 
@@ -91,9 +79,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const upgradeItem = createWrapperUpgradeItem();
     context.subscriptions.push(upgradeItem);
     void checkWrapperUpgradeBadge(upgradeItem);
-    const kotlinLspUpgradeItem = createKotlinLspUpgradeItem();
-    context.subscriptions.push(kotlinLspUpgradeItem);
-    void checkKotlinLspUpgradeBadge(kotlinLspUpgradeItem);
     // Re-check when any wrapper properties file changes.
     const wrapperWatcher = vscode.workspace.createFileSystemWatcher(
         '**/gradle/wrapper/gradle-wrapper.properties'
@@ -285,15 +270,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('gradleKotlin.upgradeWrapper', async (uri?: vscode.Uri) => {
             await upgradeWrapper(daemon, uri);
             await refreshAll(modulesProvider, codeLensProvider, inlayProvider);
-        }),
-        vscode.commands.registerCommand('gradleKotlin.installKotlinLsp', async () => {
-            await installKotlinLsp(context, false, kotlinLspUpgradeItem);
-        }),
-        vscode.commands.registerCommand('gradleKotlin.uninstallKotlinLsp', async () => {
-            await uninstallKotlinLsp(kotlinLspUpgradeItem);
-        }),
-        vscode.commands.registerCommand('gradleKotlin.updateKotlinLsp', async () => {
-            await updateKotlinLsp(context, kotlinLspUpgradeItem);
         }),
         vscode.commands.registerCommand('gradleKotlin.runTask', async (target: ModuleTreeItemData | GradleTask | undefined) => {
             await runTaskCommand(daemon, target, recordRun, {}, modulesProvider, runningTaskCancels);
@@ -920,163 +896,6 @@ async function fetchLatestGradleVersion(): Promise<string | undefined> {
     } catch {
         return undefined;
     }
-}
-
-async function fetchKotlinLspReleases(limit = 8): Promise<KotlinLspRelease[]> {
-    try {
-        const res = await fetch(`https://api.github.com/repos/Kotlin/kotlin-lsp/releases?per_page=${limit}`, {
-            headers: { 'User-Agent': 'vscode-gradle-kotlin' },
-        });
-        if (!res.ok) return [KOTLIN_LSP_FALLBACK_RELEASE];
-        const releases = parseKotlinLspReleases(await res.json()).filter(r => !r.prerelease);
-        return releases.length > 0 ? releases : [KOTLIN_LSP_FALLBACK_RELEASE];
-    } catch {
-        return [KOTLIN_LSP_FALLBACK_RELEASE];
-    }
-}
-
-function installedKotlinLspVersion(): string | undefined {
-    const ext = vscode.extensions.getExtension(KOTLIN_LSP_EXTENSION_ID);
-    const version = ext?.packageJSON?.version;
-    return typeof version === 'string' ? version : undefined;
-}
-
-async function pickKotlinLspPlatform(): Promise<KotlinLspPlatform | undefined> {
-    const preferred = defaultKotlinLspPlatform(process.platform, process.arch);
-    const platforms: KotlinLspPlatform[] = ['mac-aarch64', 'mac-amd64', 'win-amd64', 'win-aarch64'];
-    const ordered = preferred ? [preferred, ...platforms.filter(p => p !== preferred)] : platforms;
-    const picked = await vscode.window.showQuickPick(
-        ordered.map(platform => ({
-            label: kotlinLspPlatformLabel(platform),
-            description: platform === preferred ? 'current host' : undefined,
-            platform,
-        })),
-        { placeHolder: 'Install Kotlin LSP server for which system?' }
-    );
-    return picked?.platform;
-}
-
-async function pickKotlinLspRelease(releases: KotlinLspRelease[]): Promise<KotlinLspRelease | undefined> {
-    const picked = await vscode.window.showQuickPick(
-        releases.map((release, index) => ({
-            label: release.version,
-            description: index === 0 ? 'latest' : release.tag,
-            release,
-        })),
-        { placeHolder: 'Select Kotlin LSP version' }
-    );
-    return picked?.release;
-}
-
-async function installKotlinLsp(
-    context: vscode.ExtensionContext,
-    updateOnly: boolean,
-    upgradeItem?: vscode.StatusBarItem
-): Promise<void> {
-    const platform = await pickKotlinLspPlatform();
-    if (!platform) return;
-    const releases = await fetchKotlinLspReleases();
-    const release = await pickKotlinLspRelease(releases);
-    if (!release) return;
-    await installKotlinLspRelease(context, release, platform, updateOnly, upgradeItem);
-}
-
-async function installKotlinLspRelease(
-    context: vscode.ExtensionContext,
-    release: KotlinLspRelease,
-    platform: KotlinLspPlatform,
-    updateOnly: boolean,
-    upgradeItem?: vscode.StatusBarItem
-): Promise<void> {
-    const url = findKotlinLspVsixUrl(release.body, platform) ?? kotlinLspVsixUrl(release.version, platform);
-    const file = vscode.Uri.joinPath(
-        context.globalStorageUri,
-        'kotlin-lsp',
-        `kotlin-server-${release.version}-${platform}.vsix`
-    );
-
-    await vscode.window.withProgress(
-        {
-            location: vscode.ProgressLocation.Notification,
-            title: `Kotlin LSP ${updateOnly ? 'update' : 'install'} ${release.version}`,
-            cancellable: false,
-        },
-        async progress => {
-            progress.report({ message: 'Downloading VSIX' });
-            const res = await fetch(url);
-            if (!res.ok) throw new Error(`Download failed (${res.status}) from ${url}`);
-            await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(context.globalStorageUri, 'kotlin-lsp'));
-            await vscode.workspace.fs.writeFile(file, Buffer.from(await res.arrayBuffer()));
-            progress.report({ message: 'Installing extension' });
-            await vscode.commands.executeCommand('workbench.extensions.installExtension', file);
-        }
-    );
-    upgradeItem?.hide();
-    vscode.window.showInformationMessage(`Kotlin LSP ${release.version} installed for ${kotlinLspPlatformLabel(platform)}.`);
-}
-
-async function updateKotlinLsp(
-    context: vscode.ExtensionContext,
-    upgradeItem?: vscode.StatusBarItem
-): Promise<void> {
-    const installed = installedKotlinLspVersion();
-    if (!installed) {
-        const choice = await vscode.window.showInformationMessage('Kotlin LSP is not installed.', 'Install');
-        if (choice === 'Install') await installKotlinLsp(context, false, upgradeItem);
-        return;
-    }
-    const latest = (await fetchKotlinLspReleases(1))[0];
-    if (!latest || compareVersions(latest.version, installed) <= 0) {
-        vscode.window.showInformationMessage(`Kotlin LSP is already up to date (${installed}).`);
-        upgradeItem?.hide();
-        return;
-    }
-    const choice = await vscode.window.showInformationMessage(
-        `A newer Kotlin LSP is available: ${installed} → ${latest.version}. Update now?`,
-        { modal: false },
-        'Update',
-        'Show release notes'
-    );
-    if (choice === 'Show release notes') {
-        vscode.env.openExternal(vscode.Uri.parse(kotlinLspReleaseUrl(latest.tag)));
-        return;
-    }
-    if (choice !== 'Update') return;
-    const platform = defaultKotlinLspPlatform(process.platform, process.arch) ?? await pickKotlinLspPlatform();
-    if (!platform) return;
-    await installKotlinLspRelease(context, latest, platform, true, upgradeItem);
-}
-
-async function uninstallKotlinLsp(upgradeItem?: vscode.StatusBarItem): Promise<void> {
-    if (!vscode.extensions.getExtension(KOTLIN_LSP_EXTENSION_ID)) {
-        vscode.window.showInformationMessage('Kotlin LSP is not installed.');
-        return;
-    }
-    const choice = await vscode.window.showWarningMessage(
-        'Uninstall Kotlin LSP by JetBrains?',
-        { modal: true },
-        'Uninstall'
-    );
-    if (choice !== 'Uninstall') return;
-    await vscode.commands.executeCommand('workbench.extensions.uninstallExtension', KOTLIN_LSP_EXTENSION_ID);
-    upgradeItem?.hide();
-}
-
-async function checkKotlinLspUpgradeBadge(item: vscode.StatusBarItem): Promise<void> {
-    const installed = installedKotlinLspVersion();
-    if (!installed) {
-        item.hide();
-        return;
-    }
-    const latest = (await fetchKotlinLspReleases(1))[0];
-    if (!latest || compareVersions(latest.version, installed) <= 0) {
-        item.hide();
-        return;
-    }
-    item.text = `$(arrow-up) Kotlin LSP ${installed} → ${latest.version}`;
-    item.tooltip = `A newer Kotlin LSP is available. Click to update to ${latest.version}.`;
-    item.command = 'gradleKotlin.updateKotlinLsp';
-    item.show();
 }
 
 /**

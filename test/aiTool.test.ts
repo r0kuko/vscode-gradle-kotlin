@@ -96,6 +96,31 @@ describe('AI Gradle tools recent history', () => {
         });
     });
 
+    it('returns failed gradle_run output as parseable JSON', async () => {
+        const daemon = {
+            run: vi.fn(async () => ({
+                exitCode: 1,
+                stdout: '',
+                stderr: '',
+                combined: '> Task :app:test FAILED\n\nexpected:<1> but was:<2>',
+                durationMs: 55,
+            })),
+        };
+        const tool = new GradleRunTool(daemon as never, () => [module as never]);
+
+        const result = await tool.invoke({ input: { task: 'test', projectPath: ':app' } } as never, {} as never);
+        const payload = JSON.parse((result.content[0] as { value: string }).value);
+
+        expect(payload).toMatchObject({
+            invocation: ':app:test',
+            exitCode: 1,
+            failed: true,
+            failedTask: ':app:test',
+            truncated: false,
+            tail: '> Task :app:test FAILED\n\nexpected:<1> but was:<2>',
+        });
+    });
+
     it('records gradle_dependencies invocations as AI recent runs', async () => {
         const daemon = {
             run: vi.fn(async () => ({
