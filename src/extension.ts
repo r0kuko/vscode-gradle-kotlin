@@ -739,7 +739,7 @@ async function coordinateGradleForJava(installed: boolean): Promise<void> {
     if (gradleConfig.get<string>('autoDetect') !== 'off') {
         await gradleConfig.update('autoDetect', 'off', vscode.ConfigurationTarget.Workspace);
         output.appendLine(
-            'Gradle for Java detected; set workspace gradle.autoDetect=off so Gradle Kotlin Companion owns Gradle task discovery.'
+            'Gradle for Java detected; set workspace gradle.autoDetect=off so Gradle Kotlin owns Gradle task discovery.'
         );
     }
 
@@ -748,7 +748,7 @@ async function coordinateGradleForJava(installed: boolean): Promise<void> {
         if (javaGradleConfig.get<string>('buildServer.enabled') !== 'off') {
             await javaGradleConfig.update('buildServer.enabled', 'off', vscode.ConfigurationTarget.Workspace);
             output.appendLine(
-                'Gradle for Java detected; set workspace java.gradle.buildServer.enabled=off so Gradle Kotlin Companion is the primary Gradle integration.'
+                'Gradle for Java detected; set workspace java.gradle.buildServer.enabled=off so Gradle Kotlin is the primary Gradle integration.'
             );
         }
     }

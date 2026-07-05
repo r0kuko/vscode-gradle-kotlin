@@ -1,4 +1,4 @@
-# Gradle Kotlin Companion
+# Gradle Kotlin
 
 A VS Code extension that brings a JetBrains-style Gradle / Kotlin-DSL
 experience to Visual Studio Code, on top of (and complementing) the
@@ -86,7 +86,7 @@ reversible:
 - routes task runs, task hydration, reloads, wrapper upgrades and daemon
   status checks through the same serialized Gradle runner;
 - uses `--daemon` by default for its own Gradle invocations, so repeated
-  Gradle Kotlin Companion tasks reuse the Gradle daemon;
+  Gradle Kotlin tasks reuse the Gradle daemon;
 - sets workspace `gradle.autoDetect = off`, so Gradle for Java does not
   also auto-discover Gradle tasks;
 - sets workspace `java.gradle.buildServer.enabled = off`, so Gradle for
@@ -133,7 +133,7 @@ action.
 | `gradleKotlin.versionInlayHints.checkLatest` | `true` | Query Maven Central and surface `current -> latest`. |
 | `gradleKotlin.codeLens.enabled` | `true` | Show top-of-file Reload / Dependencies lenses. |
 | `gradleKotlin.daemon.enabled` | `true` | Allow daemon usage when `gradleKotlin.daemon.mode` permits it; disable to always pass `--no-daemon`. |
-| `gradleKotlin.daemon.mode` | `auto` | Use `--daemon` by default for shared Gradle Kotlin Companion task execution; can be forced to `never`. |
+| `gradleKotlin.daemon.mode` | `auto` | Use `--daemon` by default for shared Gradle Kotlin task execution; can be forced to `never`. |
 | `gradleKotlin.initScript.enabled` | `true` | Inject an init script via `-I` for every daemon invocation. |
 | `gradleKotlin.initScriptPath` | _empty_ | Override the init script path; defaults to the bundled one. |
 | `gradleKotlin.gradleForJava.integrationMode` | `takeover` | Disable Gradle for Java task auto-detection and Java Gradle Build Server for the workspace; use `coexist` or `off` to loosen that. |
