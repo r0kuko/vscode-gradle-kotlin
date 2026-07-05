@@ -544,9 +544,13 @@ function buildReportHints(
     const xmlDir = path.join(moduleRoot, 'build', 'test-results', taskReportName);
     const htmlFile = path.join(moduleRoot, 'build', 'reports', 'tests', taskReportName, 'index.html');
     return [
-        { kind: 'junitXml', path: xmlDir, exists: fs.existsSync(xmlDir) },
-        { kind: 'html', path: htmlFile, exists: fs.existsSync(htmlFile) },
+        { kind: 'junitXml', path: toPortablePath(xmlDir), exists: fs.existsSync(xmlDir) },
+        { kind: 'html', path: toPortablePath(htmlFile), exists: fs.existsSync(htmlFile) },
     ];
+}
+
+function toPortablePath(file: string): string {
+    return file.replace(/\\/g, '/');
 }
 
 function parseGradleTaskPath(invocation: string): { projectPath: string; taskName: string } | undefined {

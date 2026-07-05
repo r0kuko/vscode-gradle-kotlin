@@ -55,7 +55,7 @@ export function normalizeFilePath(file: string, workspaceRoot: string): string {
     // A Windows absolute path (C:\... or C:/...) is absolute on any host.
     const isWindowsAbsolute = /^[A-Za-z]:[\\/]/.test(file);
     if (!isWindowsAbsolute && !path.isAbsolute(file)) {
-        file = path.resolve(workspaceRoot, file);
+        file = path.join(workspaceRoot, file);
     }
     return path.normalize(file);
 }

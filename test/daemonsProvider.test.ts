@@ -56,7 +56,11 @@ describe('DaemonsProvider', () => {
         await provider.stopAllDaemons('/selected');
 
         expect(stopAll).toHaveBeenCalledWith('/selected');
-        expect(kill).toHaveBeenCalledWith(99392, 'SIGKILL');
+        if (process.platform === 'win32') {
+            expect(kill).not.toHaveBeenCalled();
+        } else {
+            expect(kill).toHaveBeenCalledWith(99392, 'SIGKILL');
+        }
         expect(provider.getChildren()).toEqual(['empty']);
     });
 });
