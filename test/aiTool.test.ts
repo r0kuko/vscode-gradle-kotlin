@@ -17,6 +17,7 @@ describe('buildRunPayload', () => {
             bytes: 'BUILD SUCCESSFUL'.length,
             tail: 'BUILD SUCCESSFUL',
             diagnostics: [],
+            reportHints: [],
         });
     });
 
@@ -96,6 +97,27 @@ describe('AI Gradle tools recent history', () => {
         });
     });
 
+    it('passes test filters with spaces as single Gradle arguments', async () => {
+        const daemon = {
+            run: vi.fn(async () => ({
+                exitCode: 0,
+                stdout: '',
+                stderr: '',
+                combined: 'BUILD SUCCESSFUL',
+                durationMs: 20,
+            })),
+        };
+        const tool = new GradleRunTool(daemon as never, () => [module as never]);
+
+        await tool.invoke({ input: { task: 'test', projectPath: ':app', tests: 'com.example.SpaceTest > handles spaces in display name' } } as never, {} as never);
+
+        expect(daemon.run).toHaveBeenCalledWith({
+            workspaceRoot: '/ws',
+            args: [':app:test', '--tests', 'com.example.SpaceTest > handles spaces in display name'],
+            token: {},
+        });
+    });
+
     it('returns failed gradle_run output as parseable JSON', async () => {
         const daemon = {
             run: vi.fn(async () => ({
@@ -119,6 +141,27 @@ describe('AI Gradle tools recent history', () => {
             truncated: false,
             tail: '> Task :app:test FAILED\n\nexpected:<1> but was:<2>',
         });
+    });
+
+    it('includes Gradle test report hints for test tasks', async () => {
+        const daemon = {
+            run: vi.fn(async () => ({
+                exitCode: 1,
+                stdout: '',
+                stderr: '',
+                combined: '> Task :app:test FAILED',
+                durationMs: 55,
+            })),
+        };
+        const tool = new GradleRunTool(daemon as never, () => [{ ...module, rootPath: '/ws/app', projectPath: ':app' } as never]);
+
+        const result = await tool.invoke({ input: { task: 'test', projectPath: ':app' } } as never, {} as never);
+        const payload = JSON.parse((result.content[0] as { value: string }).value);
+
+        expect(payload.reportHints).toEqual([
+            { kind: 'junitXml', path: '/ws/app/build/test-results/test', exists: false },
+            { kind: 'html', path: '/ws/app/build/reports/tests/test/index.html', exists: false },
+        ]);
     });
 
     it('records gradle_dependencies invocations as AI recent runs', async () => {

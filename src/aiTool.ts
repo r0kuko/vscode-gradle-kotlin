@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { GradleDaemon } from './daemon';
 import { GradleModule } from './gradle';
 import { qualifyTask, parseTasksAllOutput } from './tasks';
@@ -14,6 +15,7 @@ import { RecentRun } from './history';
 export interface GradleRunToolInput {
     task: string;
     projectPath?: string;
+    tests?: string | string[];
     args?: string[];
 }
 
@@ -83,12 +85,13 @@ export class GradleRunTool implements vscode.LanguageModelTool<GradleRunToolInpu
         options: vscode.LanguageModelToolInvocationPrepareOptions<GradleRunToolInput>
     ): Promise<vscode.PreparedToolInvocation> {
         const fullTask = this.fullyQualifyTask(options.input);
+        const args = [...testFilterArgs(options.input.tests), ...(options.input.args ?? [])];
         return {
             invocationMessage: `Running \`gradle ${fullTask}\``,
             confirmationMessages: {
                 title: 'Run Gradle task',
                 message: new vscode.MarkdownString(
-                    `Allow Copilot to invoke \`gradle ${fullTask}${formatArgs(options.input.args)}\` in your workspace?`
+                    `Allow Copilot to invoke \`gradle ${fullTask}${formatArgs(args)}\` in your workspace?`
                 ),
             },
         };
@@ -108,12 +111,13 @@ export class GradleRunTool implements vscode.LanguageModelTool<GradleRunToolInpu
         }
         const workspaceRoot = modules[0].workspaceRoot;
         const fullTask = this.fullyQualifyTask(options.input);
-        const args = [fullTask, ...(options.input.args ?? [])];
+        const extraArgs = [...testFilterArgs(options.input.tests), ...(options.input.args ?? [])];
+        const args = [fullTask, ...extraArgs];
 
         const result = await this.daemon.run({ workspaceRoot, args, token });
         await this.recordRun?.({
             task: fullTask,
-            args: options.input.args ?? [],
+            args: extraArgs,
             workspaceRoot,
             timestamp: Date.now(),
             exitCode: result.exitCode,
@@ -121,7 +125,7 @@ export class GradleRunTool implements vscode.LanguageModelTool<GradleRunToolInpu
             source: 'ai',
         });
 
-        return toolResult(buildRunPayload(fullTask, result));
+        return toolResult(buildRunPayload(fullTask, result, { modules, workspaceRoot }));
     }
 
     private fullyQualifyTask(input: GradleRunToolInput): string {
@@ -289,7 +293,21 @@ function formatArgs(args: string[] | undefined): string {
     return ' ' + args.join(' ');
 }
 
+function testFilterArgs(tests: string | string[] | undefined): string[] {
+    if (!tests) return [];
+    const patterns = Array.isArray(tests) ? tests : [tests];
+    return patterns.flatMap(pattern => {
+        const trimmed = pattern.trim();
+        return trimmed ? ['--tests', trimmed] : [];
+    });
+}
+
 const MAX_TAIL_BYTES = 16_000;
+
+interface BuildRunPayloadContext {
+    modules?: GradleModule[];
+    workspaceRoot?: string;
+}
 
 /**
  * Build a structured payload for Copilot tools. Always returns the last
@@ -298,7 +316,8 @@ const MAX_TAIL_BYTES = 16_000;
  */
 export function buildRunPayload(
     invocation: string,
-    result: { exitCode: number | null; durationMs: number; combined: string }
+    result: { exitCode: number | null; durationMs: number; combined: string },
+    context: BuildRunPayloadContext = {}
 ): {
     invocation: string;
     exitCode: number | null;
@@ -314,6 +333,11 @@ export function buildRunPayload(
         column: number;
         severity: 'error' | 'warning';
         message: string;
+    }>;
+    reportHints: Array<{
+        kind: 'junitXml' | 'html';
+        path: string;
+        exists: boolean;
     }>;
 } {
     const truncated = result.combined.length > MAX_TAIL_BYTES;
@@ -337,7 +361,43 @@ export function buildRunPayload(
         bytes: result.combined.length,
         tail: truncated ? result.combined.slice(-MAX_TAIL_BYTES) : result.combined,
         diagnostics,
+        reportHints: buildReportHints(invocation, context),
     };
+}
+
+function buildReportHints(
+    invocation: string,
+    context: BuildRunPayloadContext
+): Array<{ kind: 'junitXml' | 'html'; path: string; exists: boolean }> {
+    const parsed = parseGradleTaskPath(invocation);
+    if (!parsed || !isTestTaskName(parsed.taskName)) return [];
+    const module = context.modules?.find(m => m.projectPath === parsed.projectPath);
+    const moduleRoot = module?.rootPath ?? context.workspaceRoot;
+    if (!moduleRoot) return [];
+    const taskReportName = parsed.taskName;
+    const xmlDir = path.join(moduleRoot, 'build', 'test-results', taskReportName);
+    const htmlFile = path.join(moduleRoot, 'build', 'reports', 'tests', taskReportName, 'index.html');
+    return [
+        { kind: 'junitXml', path: xmlDir, exists: fs.existsSync(xmlDir) },
+        { kind: 'html', path: htmlFile, exists: fs.existsSync(htmlFile) },
+    ];
+}
+
+function parseGradleTaskPath(invocation: string): { projectPath: string; taskName: string } | undefined {
+    const taskPath = invocation.trim().split(/\s+/)[0];
+    if (!taskPath) return undefined;
+    const segments = taskPath.split(':').filter(Boolean);
+    if (segments.length === 0) return { projectPath: ':', taskName: taskPath };
+    const taskName = segments[segments.length - 1];
+    const projectSegments = segments.slice(0, -1);
+    return {
+        projectPath: projectSegments.length > 0 ? `:${projectSegments.join(':')}` : ':',
+        taskName,
+    };
+}
+
+function isTestTaskName(taskName: string): boolean {
+    return /(^|Test)(test|Test)$/.test(taskName) || taskName.toLowerCase().endsWith('test');
 }
 
 function toolResult(payload: unknown): vscode.LanguageModelToolResult {
