@@ -630,6 +630,57 @@
         }
       },
       {
+        "name": "gradle_test",
+        "displayName": "Run Gradle Tests",
+        "modelDescription": "Run Gradle tests through the shared serialized runner with first-class test intent. Prefer this over gradle_run for Kotlin/JUnit tests. Accepts projectPath, task, classes, methods, explicit tests filters, extra args, rerunLast, and rerunFailed. It handles --tests filters as separate arguments so display names containing spaces are preserved, parses Gradle JUnit XML reports, returns executed/failed tests, report paths, and remembers failed filters for rerunFailed.",
+        "userDescription": "Runs focused Gradle tests and summarizes JUnit reports.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "gradleTest",
+        "icon": "$(beaker)",
+        "tags": ["gradle", "kotlin", "test", "junit"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "projectPath": {
+              "type": "string",
+              "description": "Optional Gradle project path, e.g. ':app' or ':modules:ecs'. Defaults to ':'. Ignored when task is fully qualified."
+            },
+            "task": {
+              "type": "string",
+              "description": "Gradle test task name or fully-qualified task path. Defaults to 'test', e.g. 'test', 'integrationTest', ':modules:ecs:test'."
+            },
+            "classes": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Test class names or Gradle class patterns. Combined with methods when methods are provided."
+            },
+            "methods": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Test method names or display names. Values with spaces are kept as one --tests argument. With one or more classes, each method is combined as Class.method."
+            },
+            "tests": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Explicit Gradle --tests filter patterns. Use for exact filters such as 'com.example.MyTest > display name with spaces'."
+            },
+            "args": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Optional extra Gradle arguments, e.g. ['--info', '--rerun-tasks']. Do not include --tests here; use classes, methods, or tests."
+            },
+            "rerunLast": {
+              "type": "boolean",
+              "description": "Rerun the previous gradle_test invocation exactly."
+            },
+            "rerunFailed": {
+              "type": "boolean",
+              "description": "Rerun failed or errored tests from the previous gradle_test invocation, using filters parsed from JUnit XML reports."
+            }
+          }
+        }
+      },
+      {
         "name": "gradle_dependencies",
         "displayName": "Run Gradle Dependencies",
         "modelDescription": "Run the Gradle dependencies task for a project path via the shared daemon.",

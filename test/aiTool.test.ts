@@ -1,5 +1,8 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { describe, it, expect, vi } from 'vitest';
-import { GradleDependenciesTool, GradleRunTool, buildRunPayload } from '../src/aiTool';
+import { GradleDependenciesTool, GradleRunTool, GradleTestTool, buildRunPayload } from '../src/aiTool';
 
 describe('buildRunPayload', () => {
     it('returns full output when under the cap', () => {
@@ -188,5 +191,77 @@ describe('AI Gradle tools recent history', () => {
             durationMs: 40,
             source: 'ai',
         });
+    });
+
+    it('runs gradle_test class and display-name filters as single arguments', async () => {
+        const daemon = {
+            run: vi.fn(async () => ({
+                exitCode: 0,
+                stdout: '',
+                stderr: '',
+                combined: 'BUILD SUCCESSFUL',
+                durationMs: 20,
+            })),
+        };
+        const tool = new GradleTestTool(daemon as never, () => [module as never]);
+
+        await tool.invoke({ input: { projectPath: ':app', classes: ['com.example.SpaceTest'], methods: ['handles spaces in display name'] } } as never, {} as never);
+
+        expect(daemon.run).toHaveBeenCalledWith({
+            workspaceRoot: '/ws',
+            args: [':app:test', '--tests', 'com.example.SpaceTest.handles spaces in display name'],
+            token: {},
+        });
+    });
+
+    it('summarizes gradle_test reports and reruns failed tests', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gradle-test-tool-'));
+        const reportDir = path.join(root, 'build', 'test-results', 'test');
+        fs.mkdirSync(reportDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(reportDir, 'TEST-com.example.SpaceTest.xml'),
+            '<testsuite tests="2" failures="1" skipped="0">' +
+                '<testcase classname="com.example.SpaceTest" name="passes" time="0.1" />' +
+                '<testcase classname="com.example.SpaceTest" name="handles spaces in display name" time="0.2">' +
+                '<failure message="expected true" />' +
+                '</testcase>' +
+                '</testsuite>'
+        );
+        const daemon = {
+            run: vi.fn(async () => ({
+                exitCode: 1,
+                stdout: '',
+                stderr: '',
+                combined: '> Task :app:test FAILED',
+                durationMs: 50,
+            })),
+        };
+        const tool = new GradleTestTool(daemon as never, () => [{ ...module, rootPath: root, projectPath: ':app' } as never]);
+
+        const result = await tool.invoke({ input: { projectPath: ':app', classes: ['com.example.SpaceTest'] } } as never, {} as never);
+        const payload = JSON.parse((result.content[0] as { value: string }).value);
+        await tool.invoke({ input: { rerunFailed: true } } as never, {} as never);
+
+        expect(payload.testSummary).toEqual({
+            total: 2,
+            passed: 1,
+            failed: 1,
+            errored: 0,
+            skipped: 0,
+            durationSec: 0.3,
+        });
+        expect(payload.failedTests).toMatchObject([
+            {
+                className: 'com.example.SpaceTest',
+                name: 'handles spaces in display name',
+                filter: 'com.example.SpaceTest.handles spaces in display name',
+            },
+        ]);
+        expect(daemon.run).toHaveBeenLastCalledWith({
+            workspaceRoot: '/ws',
+            args: [':app:test', '--tests', 'com.example.SpaceTest.handles spaces in display name'],
+            token: {},
+        });
+        fs.rmSync(root, { recursive: true, force: true });
     });
 });

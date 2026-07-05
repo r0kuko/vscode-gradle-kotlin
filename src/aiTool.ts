@@ -8,6 +8,7 @@ import { findCatalogFile, parseCatalogFile } from './libs';
 import { searchArtifacts } from './mavenSearch';
 import { parseGradleDiagnostics } from './buildDiagnostics';
 import { RecentRun } from './history';
+import { JUnitCaseResult, readJUnitReports } from './junitReport';
 
 /**
  * Input schema declared in package.json under `languageModelTools`.
@@ -21,6 +22,17 @@ export interface GradleRunToolInput {
 
 export interface GradleTasksToolInput {
     projectPath?: string;
+}
+
+export interface GradleTestToolInput {
+    projectPath?: string;
+    task?: string;
+    classes?: string[];
+    methods?: string[];
+    tests?: string[];
+    args?: string[];
+    rerunLast?: boolean;
+    rerunFailed?: boolean;
 }
 
 export interface GradleDependenciesToolInput {
@@ -180,6 +192,117 @@ export class GradleTasksTool implements vscode.LanguageModelTool<GradleTasksTool
     }
 }
 
+interface NormalizedGradleTestSpec {
+    workspaceRoot: string;
+    projectPath: string;
+    taskName: string;
+    fullTask: string;
+    filters: string[];
+    args: string[];
+}
+
+export class GradleTestTool implements vscode.LanguageModelTool<GradleTestToolInput> {
+    private lastSpec: NormalizedGradleTestSpec | undefined;
+    private lastFailedFilters: string[] = [];
+
+    constructor(
+        private readonly daemon: GradleDaemon,
+        private readonly resolveDefaultWorkspace: () => GradleModule[],
+        private readonly recordRun?: (run: RecentRun) => Promise<void>
+    ) {}
+
+    async prepareInvocation(
+        options: vscode.LanguageModelToolInvocationPrepareOptions<GradleTestToolInput>
+    ): Promise<vscode.PreparedToolInvocation> {
+        const modules = this.resolveDefaultWorkspace();
+        const spec = this.normalizeSpec(options.input, modules);
+        const label = spec
+            ? `${spec.fullTask}${formatArgs(testFilterArgs(spec.filters))}${formatArgs(spec.args)}`
+            : 'Gradle tests';
+        return {
+            invocationMessage: `Running \`gradle ${label}\``,
+            confirmationMessages: {
+                title: 'Run Gradle tests',
+                message: new vscode.MarkdownString(`Allow Copilot to invoke \`gradle ${label}\` in your workspace?`),
+            },
+        };
+    }
+
+    async invoke(
+        options: vscode.LanguageModelToolInvocationOptions<GradleTestToolInput>,
+        token: vscode.CancellationToken
+    ): Promise<vscode.LanguageModelToolResult> {
+        const modules = this.resolveDefaultWorkspace();
+        if (modules.length === 0) return noWorkspaceResult();
+        const spec = this.normalizeSpec(options.input, modules);
+        if (!spec) {
+            return toolResult({
+                error: options.input.rerunFailed
+                    ? 'No failed Gradle tests are available to rerun.'
+                    : 'No previous Gradle test invocation is available to rerun.',
+            });
+        }
+
+        const runArgs = [spec.fullTask, ...testFilterArgs(spec.filters), ...spec.args];
+        const result = await this.daemon.run({ workspaceRoot: spec.workspaceRoot, args: runArgs, token });
+        await this.recordRun?.({
+            task: spec.fullTask,
+            args: runArgs.slice(1),
+            workspaceRoot: spec.workspaceRoot,
+            timestamp: Date.now(),
+            exitCode: result.exitCode,
+            durationMs: result.durationMs,
+            source: 'ai',
+        });
+
+        const basePayload = buildRunPayload(spec.fullTask, result, { modules, workspaceRoot: spec.workspaceRoot });
+        const junitHint = basePayload.reportHints.find(h => h.kind === 'junitXml');
+        const cases = junitHint ? readJUnitReports(junitHint.path) : [];
+        const failedCases = cases.filter(c => c.status === 'failed' || c.status === 'errored');
+        this.lastSpec = spec;
+        this.lastFailedFilters = failedCases.map(testCaseFilter).filter(Boolean);
+
+        return toolResult({
+            ...basePayload,
+            normalized: {
+                task: spec.fullTask,
+                filters: spec.filters,
+                args: spec.args,
+            },
+            testSummary: summarizeTestCases(cases),
+            failedTests: failedCases.map(c => ({ ...c, filter: testCaseFilter(c) })),
+            executedTests: cases.slice(0, 100),
+        });
+    }
+
+    private normalizeSpec(input: GradleTestToolInput, modules: GradleModule[]): NormalizedGradleTestSpec | undefined {
+        if (input.rerunFailed) {
+            if (!this.lastSpec || this.lastFailedFilters.length === 0) return undefined;
+            return {
+                ...this.lastSpec,
+                filters: this.lastFailedFilters,
+                args: input.args ?? this.lastSpec.args,
+            };
+        }
+        if (input.rerunLast) return this.lastSpec;
+
+        const workspaceRoot = modules[0].workspaceRoot;
+        const rawTask = (input.task ?? 'test').trim() || 'test';
+        const parsedTask = rawTask.startsWith(':') ? parseGradleTaskPath(rawTask) : undefined;
+        const projectPath = parsedTask?.projectPath ?? input.projectPath ?? ':';
+        const taskName = parsedTask?.taskName ?? rawTask;
+        const filters = normalizeTestFilters(input);
+        return {
+            workspaceRoot,
+            projectPath,
+            taskName,
+            fullTask: rawTask.startsWith(':') ? rawTask : qualifyTask(projectPath, taskName),
+            filters,
+            args: input.args ?? [],
+        };
+    }
+}
+
 export class GradleDependenciesTool
     implements vscode.LanguageModelTool<GradleDependenciesToolInput>
 {
@@ -302,6 +425,49 @@ function testFilterArgs(tests: string | string[] | undefined): string[] {
     });
 }
 
+function normalizeTestFilters(input: GradleTestToolInput): string[] {
+    const explicit = stringArray(input.tests);
+    const classes = stringArray(input.classes);
+    const methods = stringArray(input.methods);
+    const combined: string[] = [...explicit];
+    if (classes.length === 0) {
+        combined.push(...methods);
+    } else if (methods.length === 0) {
+        combined.push(...classes);
+    } else {
+        for (const className of classes) {
+            for (const method of methods) combined.push(`${className}.${method}`);
+        }
+    }
+    return [...new Set(combined.map(s => s.trim()).filter(Boolean))];
+}
+
+function stringArray(value: string[] | undefined): string[] {
+    return Array.isArray(value) ? value : [];
+}
+
+function summarizeTestCases(cases: JUnitCaseResult[]): {
+    total: number;
+    passed: number;
+    failed: number;
+    errored: number;
+    skipped: number;
+    durationSec: number;
+} {
+    return {
+        total: cases.length,
+        passed: cases.filter(c => c.status === 'passed').length,
+        failed: cases.filter(c => c.status === 'failed').length,
+        errored: cases.filter(c => c.status === 'errored').length,
+        skipped: cases.filter(c => c.status === 'skipped').length,
+        durationSec: Number(cases.reduce((sum, c) => sum + c.durationSec, 0).toFixed(3)),
+    };
+}
+
+function testCaseFilter(testCase: JUnitCaseResult): string {
+    return testCase.className ? `${testCase.className}.${testCase.name}` : testCase.name;
+}
+
 const MAX_TAIL_BYTES = 16_000;
 
 interface BuildRunPayloadContext {
@@ -421,6 +587,7 @@ export function registerGradleRunTool(
     context.subscriptions.push(
         lm.registerTool('gradle_run', new GradleRunTool(daemon, modulesProvider, recordRun)),
         lm.registerTool('gradle_tasks', new GradleTasksTool(daemon, modulesProvider)),
+        lm.registerTool('gradle_test', new GradleTestTool(daemon, modulesProvider, recordRun)),
         lm.registerTool(
             'gradle_dependencies',
             new GradleDependenciesTool(daemon, modulesProvider, recordRun)
